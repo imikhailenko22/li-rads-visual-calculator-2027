@@ -1484,7 +1484,6 @@ function SizeInputBlock({
   onSizeChange,
   openSpecialGallery,
   title = "Size",
-  showRequiredIndicator = false,
 }: {
   sizeValue: string;
   sizeUnit: SizeUnit;
