@@ -1,13 +1,16 @@
 import React, { useMemo, useState } from "react";
 
 /**
- * LI-RADS Visual Calculator (CT/MRI v2018)
+ * LI-RADS Visual Calculator (CT/MRI v2027 draft)
  * ---------------------------------------------------------------
  * This single-file React + Tailwind app uses the following sequence: observation type → special conditions → major features → size →
  * ancillary features → category. It also adds an optional image layer so you
  * can show real APHE/washout/capsule/threshold-growth examples from the LI-RADS
  * manual
  *
+ * Draft specification: supplied v2027 CT/MRI untreated observation algorithm.
+ * 2027 reporting: supplied CT/MRI v2027 Diagnosis: Untreated observations templates.
+ * Clinical validation and draft tie-breaking clarification still required.
  * IMPORTANT: Educational aid only. Not a medical device. Do not use for primary
  * diagnosis. Verify with the official LI-RADS manual and institutional policy.
  */
@@ -131,12 +134,11 @@ function toMm(value: number, unit: "mm" | "cm"): number {
 //   return Math.max(aMm, bMm);
 // }
 
-type SizeBucket = "<10" | "10-19" | ">=20";
+type SizeBucket = "<10" | ">=10";
 
 function bucketFromMm(mm: number): SizeBucket {
   if (mm < 10) return "<10";
-  if (mm < 20) return "10-19";
-  return ">=20";
+  return ">=10";
 }
 
 // -------- Major-feature images (APHE, washout, capsule, growth) --------
@@ -225,7 +227,8 @@ type SpecialKey =
   | "definitelyBenign"
   | "probablyBenign"
   | "tiv"
-  | "malignantNotHcc";
+  | "malignantNotHcc"
+  | "uncertainMass";
 
 type SpecialFeature = {
   id: string;
@@ -244,27 +247,16 @@ type SpecialVisualConfig =
   | { type: "simple"; keyPrefix: string }
   | { type: "features"; title: string; features: SpecialFeature[] };
 
+// The v2027 draft LR-1/2 branch explicitly identifies these benign patterns.
+// The draft groups LR-1 and LR-2; separate definite/probable inputs preserve
+// the existing interface provisionally pending committee sign-off.
 const BENIGN_FEATURES: SpecialFeature[] = [
-  // FeatureCheckboxPanel lays benign/probably-benign entities into two manual
-  // columns so the left column ends with Other and does not stretch neighboring
-  // cards when Other expands.
   { id: "cyst", label: "Cyst" },
   { id: "perfusionAlt", label: "Perfusion alteration" },
   { id: "hemangioma", label: "Hemangioma" },
-  { id: "hepaticFat", label: "Hepatic fat deposition" },
+  { id: "hepaticFat", label: "Focal fat deposition" },
   { id: "focalFat", label: "Focal fat sparing" },
-  { id: "confluentFibrosis", label: "Confluent fibrosis" },
-  { id: "otherBenign", label: "Other" },
-
-  { id: "hyperPseudo", label: "Hypertrophic pseudomass" },
-  { id: "focalScar", label: "Focal scar" },
-  { id: "vascularAnomaly", label: "Vascular anomaly" },
-  { id: "liverAbscess", label: "Liver abscess" },
-
-  {
-    id: "distinctiveNodWithout",
-    label: "Distinctive nodule w/o malignant features",
-  },
+  { id: "distinctiveNodWithout", label: "Nodule with no major features, LR-M features, or AF-malignancy" },
 ];
 
 const DEFINITELY_BENIGN_FEATURES: SpecialFeature[] = BENIGN_FEATURES.filter(
@@ -431,6 +423,7 @@ const SPECIAL_OPTIONS: { value: SpecialKey | "none"; label: string }[] = [
     value: "malignantNotHcc",
     label: "The observation has at least one targetoid imaging feature",
   },
+  { value: "uncertainMass", label: "≥10 mm nonrim APHE only; uncertain if mass or nonmass" },
   { value: "none", label: "None apply" },
 ];
 
@@ -444,7 +437,6 @@ const SPECIAL_OPTION_CONFIG: Partial<Record<SpecialKey, SpecialVisualConfig>> =
       title: "TARGETOID FEATURES",
       features: [
         { id: "rimAphe", label: "Rim APHE" },
-        { id: "peripheralWashout", label: "Peripheral washout" },
         {
           id: "delayedCentralEnhancement",
           label: "Delayed central enhancement",
@@ -455,7 +447,7 @@ const SPECIAL_OPTION_CONFIG: Partial<Record<SpecialKey, SpecialVisualConfig>> =
         },
         {
           id: "targetoidTransitionalHbp",
-          label: "Targetoid transitional/hepatobiliary phase",
+          label: "Targetoid TP/HBP hypointensity",
         },
       ],
     },
@@ -527,26 +519,11 @@ function getSelectedSpecial(u: UntreatedInputs): SpecialKey | "none" {
   if (u.probablyBenign) return "probablyBenign";
   if (u.tiv) return "tiv";
   if (u.malignantNotHcc) return "malignantNotHcc";
+  if (u.uncertainMass) return "uncertainMass";
   return "none";
 }
 
 // LR recommendations shown in the output
-const RECOMMENDATIONS: Record<string, string> = {
-  "LR-TIV":
-    "Multidisciplinary discussion for tailored workup. May include biopsy.",
-  "LR-NC": "Repeat or alternative diagnostic imaging in ≤ 3 months.",
-  "LR-M":
-    "Multidisciplinary discussion for tailored workup. Often includes biopsy.",
-  "LR-1": "Return to surveillance in 6 months.",
-  "LR-2":
-    "Return to surveillance in 6 months. Consider repeat diagnostic imaging in ≤ 6 months.",
-  "LR-3": "Repeat or alternative diagnostic imaging in 3–6 months.",
-  "LR-4":
-    "Multidisciplinary discussion for tailored workup. May include biopsy.",
-  "LR-5":
-    "HCC confirmed. Multidisciplinary discussion for consensus management.",
-};
-
 const CATEGORY_COLORS: Record<
   string,
   { backgroundColor: string; borderColor: string; color: string }
@@ -639,141 +616,26 @@ function CloseCircleButton({
 // Lightbox for special-question galleries (examples/pitfalls) with zoom
 
 // Ancillary feature summary choice
-type AncillaryEffect = "malignancy" | "benignity" | "hcc";
+type AncillaryEffect = "malignancy" | "benignity";
+type AncillaryFeature = { id: string; label: string; effect: AncillaryEffect };
 
-type AncillaryFeature = {
-  id: string;
-  label: string;
-  effect: AncillaryEffect;
-};
-
+// LI-RADS v2027 draft, CT/MRI untreated observations: Step 2.
 const ANCILLARY_FEATURES: AncillaryFeature[] = [
-  // Favoring malignancy
-  {
-    id: "us_visibility",
-    label: "US visibility as discrete nodule",
-    effect: "malignancy",
-  },
-  {
-    id: "subthreshold_growth",
-    label: "Subthreshold growth",
-    effect: "malignancy",
-  },
-  {
-    id: "restricted_diffusion",
-    label: "Restricted diffusion",
-    effect: "malignancy",
-  },
-  {
-    id: "mild_moderate_t2",
-    label: "Mild–moderate T2 hyperintensity",
-    effect: "malignancy",
-  },
-  {
-    id: "corona_enhancement",
-    label: "Corona enhancement",
-    effect: "malignancy",
-  },
-  {
-    id: "tp_hbp_hypointensity",
-    label: "Transitional or hepatobiliary phase hypointensity",
-    effect: "malignancy",
-  },
-  {
-    id: "iron_sparing",
-    label: "Iron sparing in solid mass",
-    effect: "malignancy",
-  },
-  {
-    id: "blood_products",
-    label: "Blood products in mass",
-    effect: "malignancy",
-  },
-
-  // Favoring benignity
-  {
-    id: "size_stability",
-    label: "Size stability > 2 years",
-    effect: "benignity",
-  },
-  {
-    id: "size_reduction",
-    label: "Size reduction",
-    effect: "benignity",
-  },
-  {
-    id: "parallels_blood_pool",
-    label: "Parallels blood pool / undistorted vessels",
-    effect: "benignity",
-  },
-  {
-    id: "iron_in_mass",
-    label: "Iron in mass > liver",
-    effect: "benignity",
-  },
-  {
-    id: "marked_t2",
-    label: "Marked T2 hyperintensity",
-    effect: "benignity",
-  },
-  {
-    id: "hbp_isointensity",
-    label: "Hepatobiliary phase isointensity",
-    effect: "benignity",
-  },
-
-  // Favoring HCC in particular
-  {
-    id: "nonenhancing_capsule",
-    label: "Nonenhancing capsule",
-    effect: "hcc",
-  },
-  {
-    id: "nodule_in_nodule",
-    label: "Nodule-in-nodule architecture",
-    effect: "hcc",
-  },
-  {
-    id: "mosaic_architecture",
-    label: "Mosaic architecture",
-    effect: "hcc",
-  },
-  {
-    id: "fat_in_mass_more_than_liver",
-    label: "Fat in mass, more than adjacent liver",
-    effect: "hcc",
-  },
-  {
-    id: "blood_products_hcc",
-    label: "Blood products in mass",
-    effect: "hcc",
-  },
+  { id: "mild_diffusion", label: "Mild diffusion restriction", effect: "malignancy" },
+  { id: "mild_moderate_t2", label: "Mild–moderate T2 hyperintensity", effect: "malignancy" },
+  { id: "definite_growth", label: "Definite growth", effect: "malignancy" },
+  { id: "size_stability_or_reduction", label: "Size reduction or stability ≥2 years", effect: "benignity" },
+  { id: "hbp_uniform_isointensity", label: "HBP uniform isointensity", effect: "benignity" },
 ];
 
-function getAvailableAncillaryFeatures(
-  imaging: ImagingSelection
-): AncillaryFeature[] {
+function getAvailableAncillaryFeatures(imaging: ImagingSelection): AncillaryFeature[] {
   return ANCILLARY_FEATURES.filter((feature) => {
-    if (imaging.modality === "ct") {
-      return ![
-        "hbp_isointensity",
-        "tp_hbp_hypointensity",
-        "mild_moderate_t2",
-        "marked_t2",
-        "restricted_diffusion",
-      ].includes(feature.id);
-    }
-
-    if (
-      imaging.modality === "mri" &&
-      imaging.mriContrastAgent === "extracellular"
-    ) {
-      return !["hbp_isointensity", "tp_hbp_hypointensity"].includes(feature.id);
-    }
-
+    if (imaging.modality === "ct") return !["mild_diffusion", "mild_moderate_t2", "hbp_uniform_isointensity"].includes(feature.id);
+    if (imaging.modality === "mri" && imaging.mriContrastAgent === "extracellular") return feature.id !== "hbp_uniform_isointensity";
     return true;
   });
 }
+
 
 function SpecialLightbox({
   //title,
@@ -905,25 +767,26 @@ interface UntreatedInputs {
   probablyBenign: boolean;
   tiv: boolean;
   malignantNotHcc: boolean;
+  uncertainMass: boolean;
+  massKind: "" | "mass" | "nonmass";
+  tpHbpStatus: MajorFeatureStatus;
+  tpHbpNonEvaluableReason: string;
 
   aphe: boolean;
   capsule: boolean;
   washout: boolean;
-  thresholdGrowth: boolean;
 
   apheStatus: MajorFeatureStatus;
   capsuleStatus: MajorFeatureStatus;
   washoutStatus: MajorFeatureStatus;
-  thresholdGrowthStatus: MajorFeatureStatus;
 
   apheNonEvaluableReason: string;
   capsuleNonEvaluableReason: string;
   washoutNonEvaluableReason: string;
-  thresholdGrowthNonEvaluableReason: string;
 
   sizeValue: string;
   sizeUnit: SizeUnit;
-  sizeBucket: "<10" | "10-19" | ">=20";
+  sizeBucket: SizeBucket;
 
   targetoidFeatureIds: string[];
   benignFeatureIds: string[];
@@ -1122,252 +985,42 @@ type EngineResult = {
   explanation: string[];
 };
 
+// CT/MRI v2027 draft: four columns (APHE absent/present × <10/≥10 mm).
 function computeBaseMajorCategory(inputs: UntreatedInputs): UntreatedCategory {
-  const sizeBucket = inputs.sizeBucket;
-  const hasAPHE = inputs.aphe;
-  const hasWashout = inputs.washout;
-  const hasCapsule = inputs.capsule;
-  const hasTG = inputs.thresholdGrowth;
-  const otherCount = [hasWashout, hasCapsule, hasTG].filter(Boolean).length;
-
-  let base: UntreatedCategory = "LR-3";
-
-  if (sizeBucket === "<10") {
-    if (hasAPHE && (hasWashout || hasCapsule || hasTG)) {
-      base = "LR-4";
-    } else {
-      base = "LR-3";
-    }
-  } else if (sizeBucket === "10-19") {
-    if (hasAPHE && (hasWashout || hasTG)) {
-      base = "LR-5";
-    } else if (hasAPHE && otherCount >= 2) {
-      base = "LR-5";
-    } else if (
-      hasAPHE &&
-      otherCount === 1 &&
-      hasCapsule &&
-      !hasWashout &&
-      !hasTG
-    ) {
-      base = "LR-4";
-    } else if (hasAPHE && otherCount === 0) {
-      base = "LR-3";
-    } else if (!hasAPHE && otherCount >= 2) {
-      base = "LR-4";
-    } else {
-      base = "LR-3";
-    }
-  } else if (sizeBucket === ">=20") {
-    if (hasAPHE && otherCount >= 1) {
-      base = "LR-5";
-    } else if (hasAPHE && otherCount === 0) {
-      base = "LR-4";
-    } else if (!hasAPHE && otherCount >= 1) {
-      base = "LR-4";
-    } else {
-      base = "LR-3";
-    }
-  }
-
-  return base;
+  const hasAnyAdditional = inputs.washout || inputs.capsule || inputs.tpHbpStatus === "yes";
+  if (inputs.aphe) return hasAnyAdditional ? (inputs.sizeBucket === ">=10" ? "LR-5" : "LR-4") : (inputs.sizeBucket === ">=10" ? "LR-4" : "LR-3");
+  return hasAnyAdditional && inputs.sizeBucket === ">=10" ? "LR-4" : "LR-3";
 }
 
 function computeUntreated(inputs: UntreatedInputs): EngineResult {
   const steps: string[] = [];
-
-  if (inputs.examCompromised) {
-    steps.push(
-      "Exam compromised by artifact or missing phase(s) → LR-NC (non-categorizable)."
-    );
-    return {
-      category: "LR-NC",
-      title: "Non-categorizable",
-      explanation: steps,
-    };
+  const finish = (category: UntreatedCategory): EngineResult => ({
+    category,
+    title: ({ "LR-NC": "Not categorizable", "LR-TIV": "Tumor in vein", "LR-1": "Definitely benign", "LR-2": "Probably benign", "LR-3": "Intermediate probability of HCC", "LR-4": "Probably HCC", "LR-5": "Definitely HCC", "LR-M": "Malignant, not specific for HCC" } as Record<UntreatedCategory,string>)[category],
+    explanation: steps,
+  });
+  if (inputs.examCompromised) { steps.push("Image degradation or omission prevents categorization."); return finish("LR-NC"); }
+  if (inputs.tiv) { steps.push("Definite tumor in vein."); return finish("LR-TIV"); }
+  if (inputs.definitelyBenign) { steps.push("Definitely benign finding: LR-1 within draft LR-1/2 branch."); return finish("LR-1"); }
+  if (inputs.probablyBenign) { steps.push("Probably benign finding: LR-2 within draft LR-1/2 branch."); return finish("LR-2"); }
+  if (inputs.malignantNotHcc) { steps.push("At least one targetoid feature."); return finish("LR-M"); }
+  if (inputs.uncertainMass) { steps.push("≥10 mm nonrim APHE-only, mass versus nonmass uncertain."); return finish("LR-3"); }
+  let base = computeBaseMajorCategory(inputs);
+  steps.push(`2027 diagnostic table → ${base} (${inputs.sizeBucket} mm; nonrim APHE ${inputs.aphe ? "present" : "absent"}; ${[inputs.washout, inputs.capsule, inputs.tpHbpStatus === "yes"].filter(Boolean).length} additional major features).`);
+  if ((base === "LR-3" || base === "LR-4") && inputs.lrMOverrideFeatureIds.length > 0) {
+    steps.push("Marked diffusion restriction, infiltrative appearance, or necrosis overrides LR-3/LR-4 to LR-M.");
+    return finish("LR-M");
   }
-  if (inputs.tiv) {
-    steps.push("Definite tumor in vein (TIV) → LR-TIV.");
-    return { category: "LR-TIV", title: "Tumor in Vein", explanation: steps };
-  }
-  if (inputs.malignantNotHcc) {
-    steps.push("Probably/definitely malignant but not HCC-specific → LR-M.");
-    return {
-      category: "LR-M",
-      title: "Probably/Definitely Malignant (non–HCC specific)",
-      explanation: steps,
-    };
-  }
-
-  let base: UntreatedCategory;
-
-  if (inputs.definitelyBenign) {
-    steps.push("Observation definitely benign → base category LR-1.");
-    base = "LR-1";
-  } else if (inputs.probablyBenign) {
-    steps.push("Observation probably benign → base category LR-2.");
-    base = "LR-2";
-  } else {
-    const sizeBucket = inputs.sizeBucket;
-    const hasAPHE = inputs.aphe;
-    const hasWashout = inputs.washout;
-    const hasCapsule = inputs.capsule;
-    const hasTG = inputs.thresholdGrowth;
-    const otherCount = [hasWashout, hasCapsule, hasTG].filter(Boolean).length;
-
-    steps.push(`Size bucket: ${sizeBucket}`);
-    steps.push(
-      `Major features → APHE: ${hasAPHE ? "yes" : "no"}; washout: ${
-        hasWashout ? "yes" : "no"
-      }; capsule: ${hasCapsule ? "yes" : "no"}; threshold growth: ${
-        hasTG ? "yes" : "no"
-      }`
-    );
-
-    base = "LR-3";
-
-    if (sizeBucket === "<10") {
-    if (hasAPHE && (hasWashout || hasCapsule || hasTG)) {
-      steps.push(
-        "<10 mm with APHE and another major feature → LR-4 (cannot be LR-5 under 10 mm)."
-      );
-      base = "LR-4";
-    } else {
-      steps.push("<10 mm without sufficient features → LR-3.");
-      base = "LR-3";
-    }
-  } else if (sizeBucket === "10-19") {
-    if (hasAPHE && (hasWashout || hasTG)) {
-      steps.push("10–19 mm + APHE + (washout OR threshold growth) → LR-5.");
-      base = "LR-5";
-    } else if (hasAPHE && otherCount >= 2) {
-      steps.push(
-        "10–19 mm + APHE + any two of {washout, capsule, threshold growth} → LR-5."
-      );
-      base = "LR-5";
-    } else if (
-      hasAPHE &&
-      otherCount === 1 &&
-      hasCapsule &&
-      !hasWashout &&
-      !hasTG
-    ) {
-      steps.push("10–19 mm + APHE + capsule only → LR-4.");
-      base = "LR-4";
-    } else if (hasAPHE && otherCount === 0) {
-      steps.push("10–19 mm + APHE only → LR-3.");
-      base = "LR-3";
-    } else if (!hasAPHE && otherCount >= 2) {
-      steps.push(
-        "10–19 mm without APHE but with ≥2 other major features → LR-4."
-      );
-      base = "LR-4";
-    } else {
-      steps.push("10–19 mm without qualifying patterns → LR-3.");
-      base = "LR-3";
-    }
-  } else if (sizeBucket === ">=20") {
-    if (hasAPHE && otherCount >= 1) {
-      steps.push(
-        "≥20 mm + APHE + ≥1 of {washout, capsule, threshold growth} → LR-5."
-      );
-      base = "LR-5";
-    } else if (hasAPHE && otherCount === 0) {
-      steps.push("≥20 mm + APHE only → LR-4.");
-      base = "LR-4";
-    } else if (!hasAPHE && otherCount >= 1) {
-      steps.push("≥20 mm without APHE but with ≥1 other major feature → LR-4.");
-      base = "LR-4";
-    } else {
-      steps.push("≥20 mm without qualifying patterns → LR-3.");
-      base = "LR-3";
-    }
-  }
-
-    const selectedLrMOverrideFeatures = LR_M_OVERRIDE_FEATURES.filter((f) =>
-      inputs.lrMOverrideFeatureIds.includes(f.id)
-    );
-
-    if (
-      (base === "LR-3" || base === "LR-4") &&
-      selectedLrMOverrideFeatures.length > 0
-    ) {
-    steps.push(
-      `LR-M feature(s) present: ${selectedLrMOverrideFeatures
-        .map((f) => f.label)
-        .join("; ")} → LR-M.`
-    );
-
-      return {
-        category: "LR-M",
-        title: "Probably/Definitely Malignant (non–HCC specific)",
-        explanation: steps,
-      };
-    }
-  }
-
-  let finalCat: UntreatedCategory = base;
-
-  const ORDER: readonly UntreatedCategory[] = [
-    "LR-1",
-    "LR-2",
-    "LR-3",
-    "LR-4",
-    "LR-5",
-  ] as const;
-  const i = ORDER.indexOf(base);
-
-  if (i !== -1) {
-    const selectedAncillaryFeatures = ANCILLARY_FEATURES.filter((f) =>
-      inputs.ancillaryFeatureIds.includes(f.id)
-    );
-
-    const hasFavoringMalignancy = selectedAncillaryFeatures.some(
-      (f) => f.effect === "malignancy" || f.effect === "hcc"
-    );
-
-    const hasFavoringBenignity = selectedAncillaryFeatures.some(
-      (f) => f.effect === "benignity"
-    );
-
-    if (hasFavoringMalignancy && !hasFavoringBenignity) {
-      const upgraded = ORDER[Math.min(i + 1, ORDER.indexOf("LR-4"))];
-
-      if (upgraded !== base) {
-        steps.push(
-          "Ancillary features favoring malignancy or HCC in particular: upgrade by one category, not above LR-4."
-        );
-        finalCat = upgraded as UntreatedCategory;
-      }
-    } else if (hasFavoringBenignity && !hasFavoringMalignancy) {
-      const downgraded = ORDER[Math.max(i - 1, ORDER.indexOf("LR-1"))];
-
-      if (downgraded !== base) {
-        steps.push(
-          "Ancillary features favoring benignity: downgrade by one category, not below LR-1."
-        );
-        finalCat = downgraded as UntreatedCategory;
-      }
-    } else if (hasFavoringMalignancy && hasFavoringBenignity) {
-      steps.push(
-        "Both malignancy/HCC-favoring and benignity-favoring ancillary features are present: no category adjustment applied."
-      );
-    }
-  }
-
-  const titles: Record<UntreatedCategory, string> = {
-    "LR-1": "Definitely Benign",
-    "LR-2": "Probably Benign",
-    "LR-3": "Intermediate Probability of HCC",
-    "LR-4": "Probably HCC",
-    "LR-5": "Definite HCC",
-    "LR-M": "Probably/Definitely Malignant (non–HCC specific)",
-    "LR-TIV": "Tumor in Vein",
-    "LR-NC": "Non-categorizable",
-  } as const;
-
-  return { category: finalCat, title: titles[finalCat], explanation: steps };
+  const selected = ANCILLARY_FEATURES.filter(f => inputs.ancillaryFeatureIds.includes(f.id));
+  const hasM = selected.some(f => f.effect === "malignancy");
+  const hasB = selected.some(f => f.effect === "benignity");
+  if (hasM && hasB) steps.push("Both AF-malignancy and AF-benignity: no ancillary category change.");
+  else if (hasM && base === "LR-3") { base = "LR-4"; steps.push("AF-malignancy upgrades LR-3 to LR-4; never to LR-5."); }
+  else if (hasB && base === "LR-4") { base = "LR-3"; steps.push("AF-benignity downgrades LR-4 to LR-3."); }
+  else if (hasB && base === "LR-3") { base = "LR-2"; steps.push("AF-benignity downgrades LR-3 to LR-2."); }
+  return finish(base);
 }
+
 
 // -------- Styles for examples / pitfalls pills --------
 const examplesButtonClass =
@@ -1738,6 +1391,11 @@ interface ReportMeta {
   priorSize: string;
   priorSizeUnit: SizeUnit;
   reportFormat: ReportFormat;
+  priorDate: string;
+  priorCategory: string;
+  washoutPhase: string;
+  tivDescription: string;
+  radiologyRecommendations: string;
 }
 
 function MeasurementInput({
@@ -2109,6 +1767,11 @@ function FeatureCheckboxPanel({
 }
 
 export default function App() {
+  
+  const [examAdequacy, setExamAdequacy] = useState<
+    "" | "A" | "B" | "C"
+  >("");
+
   const [state, setState] = useState<AppState>({
     untreated: {
       examCompromised: false,
@@ -2116,21 +1779,22 @@ export default function App() {
       probablyBenign: false,
       tiv: false,
       malignantNotHcc: false,
+      uncertainMass: false,
+      massKind: "mass",
+      tpHbpStatus: "",
+      tpHbpNonEvaluableReason: "",
       aphe: false,
       capsule: false,
       washout: false,
-      thresholdGrowth: false,
       apheStatus: "",
       capsuleStatus: "",
       washoutStatus: "",
-      thresholdGrowthStatus: "",
       apheNonEvaluableReason: "",
       capsuleNonEvaluableReason: "",
       washoutNonEvaluableReason: "",
-      thresholdGrowthNonEvaluableReason: "",
       sizeValue: "",
       sizeUnit: "mm",
-      sizeBucket: "10-19",
+      sizeBucket: ">=10",
       targetoidFeatureIds: [],
       benignFeatureIds: [],
       benignOtherText: "",
@@ -2157,6 +1821,11 @@ export default function App() {
       priorSize: "",
       priorSizeUnit: "mm",
       reportFormat: "essentials",
+      priorDate: "",
+      priorCategory: "",
+      washoutPhase: "",
+      tivDescription: "",
+      radiologyRecommendations: "",
     },
   });
 
@@ -2217,6 +1886,8 @@ export default function App() {
           ancillaryFeatureIds: s.untreated.ancillaryFeatureIds.filter((id) =>
             availableAncillaryIds.has(id)
           ),
+          tpHbpStatus: nextImaging.modality === "mri" && nextImaging.mriContrastAgent === "hepatobiliary" ? s.untreated.tpHbpStatus : "",
+          tpHbpNonEvaluableReason: nextImaging.modality === "mri" && nextImaging.mriContrastAgent === "hepatobiliary" ? s.untreated.tpHbpNonEvaluableReason : "",
         },
       };
     });
@@ -2382,6 +2053,7 @@ export default function App() {
         probablyBenign: which === "probablyBenign",
         tiv: which === "tiv",
         malignantNotHcc: which === "malignantNotHcc",
+        uncertainMass: which === "uncertainMass",
 
         // Clear conditional feature selections when switching major pathway
         targetoidFeatureIds:
@@ -2407,41 +2079,20 @@ export default function App() {
   const sizeNumber = parseFirstNumber(state.untreated.sizeValue);
   const sizeComplete = sizeNumber != null && sizeNumber > 0;
 
-  // Size is not required to produce an LR-TIV score.
-  const sizeRequiredForScore = selectedSpecial !== "tiv";
-  const sizeRequirementSatisfied = !sizeRequiredForScore || sizeComplete;
+  const requiresSize = !["tiv", "examCompromised"].includes(selectedSpecial);
+  const sizeRequiredForScore = requiresSize;
+  const sizeRequirementSatisfied = !requiresSize || sizeComplete;
+  const majorFeaturesRequired = hasAnsweredInitialQuestion && selectedSpecial === "none";
+  const tpHbpRelevant = state.imaging.modality === "mri" && state.imaging.mriContrastAgent === "hepatobiliary";
+  const majorStatuses = [state.untreated.apheStatus, state.untreated.washoutStatus, state.untreated.capsuleStatus, ...(tpHbpRelevant ? [state.untreated.tpHbpStatus] : [])];
+  const majorFeaturesComplete = majorStatuses.every(s => s === "yes" || s === "no");
+  const uncertainMassValid = !state.untreated.uncertainMass || (sizeComplete && toMm(sizeNumber!, state.untreated.sizeUnit) >= 10);
+  const specialFeaturesComplete = selectedSpecial !== "malignantNotHcc" || state.untreated.targetoidFeatureIds.length > 0;
+  const massDecisionComplete = selectedSpecial !== "none" || state.untreated.massKind === "mass";
+  const showCalculatedResult = imagingSelectionComplete && hasAnsweredInitialQuestion && sizeRequirementSatisfied && uncertainMassValid && specialFeaturesComplete && massDecisionComplete && (!majorFeaturesRequired || majorFeaturesComplete);
+  const missingMajorFeatureCount = majorFeaturesRequired ? majorStatuses.filter(s => s !== "yes" && s !== "no").length : 0;
+  const requiredQuestionsRemaining = (imagingSelectionComplete ? 0 : 1) + (hasAnsweredInitialQuestion ? 0 : 1) + (sizeRequirementSatisfied ? 0 : 1) + (uncertainMassValid ? 0 : 1) + (specialFeaturesComplete ? 0 : 1) + (massDecisionComplete ? 0 : 1) + missingMajorFeatureCount;
 
-  const majorFeaturesComplete = [
-    state.untreated.apheStatus,
-    state.untreated.washoutStatus,
-    state.untreated.capsuleStatus,
-    state.untreated.thresholdGrowthStatus,
-  ].every((status) => status !== "");
-
-  // Major features are required only on the standard ("None apply") pathway.
-  const majorFeaturesRequired =
-    hasAnsweredInitialQuestion && selectedSpecial === "none";
-
-  const showCalculatedResult =
-    imagingSelectionComplete &&
-    hasAnsweredInitialQuestion &&
-    sizeRequirementSatisfied &&
-    (!majorFeaturesRequired || majorFeaturesComplete);
-
-  const missingMajorFeatureCount = majorFeaturesRequired
-    ? [
-        state.untreated.apheStatus,
-        state.untreated.washoutStatus,
-        state.untreated.capsuleStatus,
-        state.untreated.thresholdGrowthStatus,
-      ].filter((status) => status === "").length
-    : 0;
-
-  const requiredQuestionsRemaining =
-    (imagingSelectionComplete ? 0 : 1) +
-    (hasAnsweredInitialQuestion ? 0 : 1) +
-    (sizeRequirementSatisfied ? 0 : 1) +
-    missingMajorFeatureCount;
 
   const availableTargetoidFeatures = useMemo(
     () => getAvailableTargetoidFeatures(state.imaging),
@@ -2456,7 +2107,7 @@ export default function App() {
   const baseMajorCategory = computeBaseMajorCategory(state.untreated);
 
   const showLrMOverrideBox =
-    selectedSpecial === "none" &&
+    selectedSpecial === "none" && state.untreated.massKind === "mass" &&
     (baseMajorCategory === "LR-3" || baseMajorCategory === "LR-4");
 
   React.useEffect(() => {
@@ -2492,21 +2143,21 @@ export default function App() {
   };
 
   const setMajorFeatureStatus = (
-    feature: "aphe" | "capsule" | "washout" | "thresholdGrowth",
+    feature: "aphe" | "capsule" | "washout" | "tpHbp",
     status: MajorFeatureStatus
   ) => {
     const statusKey = `${feature}Status` as keyof UntreatedInputs;
     const reasonKey = `${feature}NonEvaluableReason` as keyof UntreatedInputs;
 
     setUntreated({
-      [feature]: status === "yes",
+      ...(feature !== "tpHbp" ? { [feature]: status === "yes" } : {}),
       [statusKey]: status,
       ...(status !== "nonEvaluable" ? { [reasonKey]: "" } : {}),
     } as Partial<UntreatedInputs>);
   };
 
   const setMajorFeatureNonEvaluableReason = (
-    feature: "aphe" | "capsule" | "washout" | "thresholdGrowth",
+    feature: "aphe" | "capsule" | "washout" | "tpHbp",
     reason: string
   ) => {
     const reasonKey = `${feature}NonEvaluableReason` as keyof UntreatedInputs;
@@ -2563,7 +2214,7 @@ export default function App() {
                 Development Team
               </h2>
               <p className="mt-1 text-sm text-gray-500">
-                Contributors to the LI-RADS v2018 Visual Calculator.
+                Contributors to the LI-RADS v2027 CT/MRI Visual Calculator.
               </p>
             </div>
 
@@ -2624,7 +2275,7 @@ export default function App() {
         <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
-              LI-RADS v2018 Visual Calculator
+              LI-RADS v2027 CT/MRI Visual Calculator (Draft)
             </h1>
             <p className="mt-0.5 text-gray-600">
               Calculator with visual references to features relevant to LI-RADS.
@@ -2641,6 +2292,49 @@ export default function App() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column: inputs */}
           <div className="lg:col-span-2 space-y-6">
+            
+<Section title="Exam-Level Adequacy Score">
+  <p className="text-sm text-gray-600">
+    Select the overall examination adequacy.
+  </p>
+
+  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    {[
+      { value: "A", label: "No or minimal limitations" },
+      { value: "B", label: "Moderate limitations" },
+      { value: "C", label: "Severe limitations" },
+    ].map((option) => (
+      <label
+        key={option.value}
+        className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-3 transition hover:shadow-sm ${
+          examAdequacy === option.value
+            ? "border-blue-500 bg-blue-50"
+            : "border-gray-200 bg-white"
+        }`}
+      >
+        <input
+          type="radio"
+          name="exam-adequacy"
+          value={option.value}
+          checked={examAdequacy === option.value}
+          onChange={() =>
+            setExamAdequacy(option.value as "A" | "B" | "C")
+          }
+          className="h-5 w-5 shrink-0 accent-blue-600"
+        />
+        <div>
+          <div className="font-bold text-gray-900">
+            {option.value}
+          </div>
+          <div className="text-sm text-gray-600">
+            {option.label}
+          </div>
+        </div>
+      </label>
+    ))}
+  </div>
+</Section>
+
             <Section
               title={
                 <div className="flex items-center justify-between gap-3">
@@ -2759,6 +2453,25 @@ export default function App() {
                   />
                 </div>
               </div>
+            </Section>
+            <Section title="Additional Reporting Details">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-xs font-semibold">Prior examination date
+                  <input type="text" placeholder="e.g., 2026-08-14" value={state.report.priorDate} onChange={e=>setReport({priorDate:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
+                </label>
+                <label className="text-xs font-semibold">Prior LI-RADS category
+                  <input type="text" placeholder="e.g., LR-3" value={state.report.priorCategory} onChange={e=>setReport({priorCategory:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
+                </label>
+                <label className="text-xs font-semibold">Washout phase (if present)
+                  <input type="text" placeholder="e.g., portal venous" value={state.report.washoutPhase} onChange={e=>setReport({washoutPhase:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
+                </label>
+                <label className="text-xs font-semibold">Tumor-in-vein extent / probable etiology
+                  <input type="text" placeholder="Distribution, extent, likely etiology" value={state.report.tivDescription} onChange={e=>setReport({tivDescription:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
+                </label>
+              </div>
+              <label className="block text-xs font-semibold">Radiology recommendations
+                <textarea rows={2} placeholder="Optional" value={state.report.radiologyRecommendations} onChange={e=>setReport({radiologyRecommendations:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
+              </label>
             </Section>
             <Section
               title={
@@ -2979,6 +2692,20 @@ export default function App() {
             </Section>
 
             {selectedSpecial === "none" && (
+              <Section title="Is the observation a mass?" subtitle="The CT/MRI v2027 diagnostic table applies only to masses.">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[{value:"mass", label:"Mass"},{value:"nonmass",label:"Nonmass (or uncertain)"}].map(o => (
+                    <label key={o.value} className="flex items-center gap-3 rounded-2xl border p-3">
+                      <input type="radio" name="massKind" className="h-5 w-5 accent-blue-600" checked={state.untreated.massKind===o.value} onChange={()=>setUntreated({massKind:o.value as "mass"|"nonmass"})}/>
+                      <span className="text-sm font-medium">{o.label}</span>
+                    </label>
+                  ))}
+                </div>
+                {state.untreated.massKind!=="mass" && <p className="text-sm text-amber-700">Use the dedicated benign/nonmass branches when applicable. The draft does not assign a general diagnostic-table category to other nonmasses.</p>}
+              </Section>
+            )}
+
+            {selectedSpecial === "none" && state.untreated.massKind === "mass" && (
               <>
                 <MajorFeatureQuestion
                   title="Is nonrim arterial phase hyperenhancement unequivocally present?"
@@ -3030,22 +2757,20 @@ export default function App() {
                   showRequiredIndicator={showRequiredIndicators && majorFeaturesRequired}
                 />
 
-                <MajorFeatureQuestion
-                  title="Is threshold growth unequivocally present (≥ 50% in ≤ 6 months)?"
-                  name="thresholdGrowth"
-                  status={state.untreated.thresholdGrowthStatus}
-                  reason={state.untreated.thresholdGrowthNonEvaluableReason}
-                  onChange={(status) =>
-                    setMajorFeatureStatus("thresholdGrowth", status)
-                  }
-                  onReasonChange={(reason) =>
-                    setMajorFeatureNonEvaluableReason("thresholdGrowth", reason)
-                  }
-                  examplesTitle="Visual references for threshold growth"
-                  galleryKey="growth_examples"
-                  openSpecialGallery={openSpecialGallery}
-                  showRequiredIndicator={showRequiredIndicators && majorFeaturesRequired}
-                />
+                {tpHbpRelevant && (
+                  <MajorFeatureQuestion
+                    title="Is transitional/hepatobiliary phase hypointensity present?"
+                    name="tpHbp"
+                    status={state.untreated.tpHbpStatus}
+                    reason={state.untreated.tpHbpNonEvaluableReason}
+                    onChange={(status) => setMajorFeatureStatus("tpHbp", status)}
+                    onReasonChange={(reason) => setMajorFeatureNonEvaluableReason("tpHbp", reason)}
+                    examplesTitle="Targetoid TP/HBP examples (reference only)"
+                    galleryKey="targetoidTransitionalHbp_positive"
+                    openSpecialGallery={openSpecialGallery}
+                    showRequiredIndicator={showRequiredIndicators && majorFeaturesRequired}
+                  />
+                )}
               </>
             )}
 
@@ -3075,10 +2800,10 @@ export default function App() {
             )}
 
             {/* Ancillary */}
-            {String(result.category) !== "LR-M" && (
-              <Section title="Select any ancillary features present:">
+            {selectedSpecial === "none" && state.untreated.massKind === "mass" && String(result.category) !== "LR-M" && (
+              <Section title="Select ancillary features present (masses only):">
                 <div className="rounded-2xl border bg-white p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <div className="mb-3 text-sm font-bold text-gray-900">
                         Favoring malignancy
@@ -3141,36 +2866,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div>
-                      <div className="mb-3 text-sm font-bold text-gray-900">
-                        Favoring HCC in particular
-                      </div>
-
-                      <div className="space-y-2">
-                        {availableAncillaryFeatures
-                          .filter((f) => f.effect === "hcc")
-                          .map((feature) => (
-                            <label
-                              key={feature.id}
-                              className="flex cursor-pointer items-start gap-2 rounded-xl px-2 py-1.5 hover:bg-gray-50"
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
-                                checked={state.untreated.ancillaryFeatureIds.includes(
-                                  feature.id
-                                )}
-                                onChange={() =>
-                                  toggleAncillaryFeature(feature.id)
-                                }
-                              />
-                              <span className="text-sm text-gray-800">
-                                {feature.label}
-                              </span>
-                            </label>
-                          ))}
-                      </div>
-                    </div>
                   </div>
                 </div>
               </Section>
@@ -3244,7 +2939,7 @@ export default function App() {
                   <div className="font-semibold">Recommendation</div>
                   <p className="text-sm text-gray-700 mt-1">
                     {showCalculatedResult
-                      ? RECOMMENDATIONS[String(result.category)] ?? "—"
+                      ? (state.report.radiologyRecommendations.trim() || "Not specified in the v2027 draft algorithm; enter institution-approved recommendation in report fields.")
                       : "A recommendation will appear once sufficient information is provided."}
                   </p>
                 </div>
@@ -3361,7 +3056,7 @@ export default function App() {
 
       <footer className="mx-auto max-w-7xl text-xs text-gray-500 pt-3 pb-10">
         <p>
-          © 2018 LI-RADS Visual Calculator. Not associated with ACR or RSNA.
+          © 2027 LI-RADS Visual Calculator (draft). Not associated with ACR or RSNA.
         </p>
       </footer>
       <Analytics />
@@ -3371,222 +3066,67 @@ export default function App() {
 
 // ------------- Report + Clipboard -------------
 
-function buildReport(
-  state: AppState,
-  result: EngineResult,
-  hasAnsweredInitialQuestion: boolean,
-  showCalculatedResult: boolean
-) {
-  const u = state.untreated;
-  const r = state.report;
-
-  const majorFeatureText = (
-    status: MajorFeatureStatus,
-    reason: string,
-    options?: { absentPresent?: boolean; thresholdGrowth?: boolean }
-  ): string => {
-    if (status === "") return "__";
-    if (status === "yes") return options?.absentPresent ? "Present" : "Yes";
-    if (status === "nonEvaluable") {
-      const cleanedReason = reason.trim();
-      return cleanedReason
-        ? `Non-evaluable (${cleanedReason})`
-        : options?.thresholdGrowth
-        ? "NA"
-        : "Equivocal";
-    }
-    return options?.absentPresent ? "Absent" : "No";
-  };
-
-  const selectedTargetoidFeatures = getAvailableTargetoidFeatures(
-    state.imaging
-  ).filter((f) => u.targetoidFeatureIds.includes(f.id));
-
-  const selectedLrMOverrideFeatures = LR_M_OVERRIDE_FEATURES.filter((f) =>
-    u.lrMOverrideFeatureIds.includes(f.id)
-  );
-
-  const selectedBenignFeatures =
-    u.definitelyBenign &&
-    SPECIAL_OPTION_CONFIG.definitelyBenign?.type === "features"
-      ? SPECIAL_OPTION_CONFIG.definitelyBenign.features.filter((f) =>
-          u.benignFeatureIds.includes(f.id)
-        )
-      : u.probablyBenign &&
-        SPECIAL_OPTION_CONFIG.probablyBenign?.type === "features"
-      ? SPECIAL_OPTION_CONFIG.probablyBenign.features.filter((f) =>
-          u.benignFeatureIds.includes(f.id)
-        )
-      : [];
-
-  const benignFeaturesText =
-    (u.definitelyBenign || u.probablyBenign) && selectedBenignFeatures.length
-      ? selectedBenignFeatures
-          .map((f) => {
-            if (f.id !== "otherBenign") return f.label;
-            const otherText = u.benignOtherText.trim();
-            return otherText ? `Other — ${otherText}` : "Other";
-          })
-          .join("; ")
-      : "None";
-
-  const selectedAncillaryFeatures = getAvailableAncillaryFeatures(
-    state.imaging
-  ).filter((f) => u.ancillaryFeatureIds.includes(f.id));
-
-  const malignantAncText =
-    selectedAncillaryFeatures
-      .filter((f) => f.effect === "malignancy")
-      .map((f) => f.label)
-      .join("; ") || "None";
-  const benignAncText =
-    selectedAncillaryFeatures
-      .filter((f) => f.effect === "benignity")
-      .map((f) => f.label)
-      .join("; ") || "None";
-  const hccAncText =
-    selectedAncillaryFeatures
-      .filter((f) => f.effect === "hcc")
-      .map((f) => f.label)
-      .join("; ") || "None";
-
-  const allAncillaryText =
-    selectedAncillaryFeatures.length > 0
-      ? selectedAncillaryFeatures.map((f) => f.label).join("; ")
-      : "None";
-
-  const lrMFeatureLabels = [
-    ...selectedTargetoidFeatures.map((f) => f.label),
-    ...selectedLrMOverrideFeatures.map((f) => f.label),
-  ];
-  const hasLrMFeatures = lrMFeatureLabels.length > 0 || u.malignantNotHcc;
-  const lrMFeaturesText = hasLrMFeatures
-    ? `Yes${lrMFeatureLabels.length ? `; ${lrMFeatureLabels.join(", ")}` : ""}`
-    : "No";
-
-  const obs = r.observationNumber.trim() || "__";
+function buildReport(state: AppState, result: EngineResult, hasAnsweredInitialQuestion: boolean, showCalculatedResult: boolean): string {
+  const u = state.untreated, r = state.report;
+  const obs = r.observationNumber.trim() || "[#]";
   const seg = r.segment.trim() || "__";
-  const sizeValue = u.sizeValue.trim() || (u.tiv ? "Not applicable" : "__");
-  const sizeUnit = u.sizeUnit || "mm";
-  const sizeWithUnit = u.sizeValue.trim() ? `${sizeValue} ${sizeUnit}` : sizeValue;
-  const imgNo = r.imageNumber.trim() || "__";
-  const seriesNo = r.seriesNumber.trim() || "__";
-  const tivVessels = r.tivVessels.trim();
-  const priorSize = r.priorSize.trim() || "No priors";
-  const priorSizeUnit = r.priorSizeUnit || "mm";
-
-  const apheText = selectedTargetoidFeatures.some((f) => f.id === "rimAphe")
-    ? "Rim"
-    : u.apheStatus === ""
-    ? "__"
-    : u.apheStatus === "yes"
-    ? "Nonrim"
-    : u.apheStatus === "nonEvaluable"
-    ? "Equivocal"
-    : "No";
-
-  const washoutText = majorFeatureText(
-    u.washoutStatus,
-    u.washoutNonEvaluableReason
-  );
-  const capsuleText = majorFeatureText(
-    u.capsuleStatus,
-    u.capsuleNonEvaluableReason,
-    { absentPresent: r.reportFormat === "fullMacro" }
-  );
-  const thresholdGrowthText = majorFeatureText(
-    u.thresholdGrowthStatus,
-    u.thresholdGrowthNonEvaluableReason,
-    { thresholdGrowth: true }
-  );
-
-  if (r.reportFormat === "fullMacro") {
-    const lines: string[] = [];
-    lines.push(`Observation ${obs}:`);
-    lines.push(`Location: Segment ${seg}`);
-    lines.push(
-      `${u.tiv ? "Size of parenchymal component" : "Size"}: ${sizeWithUnit} (image ${imgNo}, series ${seriesNo})`
-    );
-    lines.push(
-      `Tumor in Vein: ${u.tiv ? `Yes${tivVessels ? ` — ${tivVessels}` : ""}` : "No"}`
-    );
-    lines.push(`LR-M Features: ${lrMFeaturesText}`);
-    if (u.definitelyBenign || u.probablyBenign) {
-      lines.push(`Benign entities: ${benignFeaturesText}`);
-    }
-    lines.push("Major features:");
-    lines.push(`APHE: ${apheText}`);
-    lines.push(`Washout Appearance: ${washoutText}`);
-    lines.push(`Capsule Appearance: ${capsuleText}`);
-    lines.push(`Threshold Growth: ${thresholdGrowthText}`);
-    if (String(result.category) !== "LR-M") {
-      lines.push("Ancillary Features:");
-      lines.push(`Favoring benignity: ${benignAncText}`);
-      lines.push(
-        `Favoring malignancy: ${[malignantAncText, hccAncText]
-          .filter((value) => value !== "None")
-          .join("; ") || "None"}`
-      );
-    }
-    lines.push(
-      `LI-RADS category: ${
-        showCalculatedResult
-          ? String(result.category)
-          : "Complete required questions to see score"
-      }`
-    );
-    return lines.join("\n");
+  const sizeMm = parseFirstNumber(u.sizeValue);
+  const cm = sizeMm == null ? "__" : (toMm(sizeMm,u.sizeUnit)/10).toLocaleString("en-US",{maximumFractionDigits:3});
+  const priorRaw = parseFirstNumber(r.priorSize);
+  const priorCm = priorRaw == null ? "No priors" : `${(toMm(priorRaw,r.priorSizeUnit)/10).toLocaleString("en-US",{maximumFractionDigits:3})} cm`;
+  const sizeText = u.tiv && sizeMm == null ? "Not applicable" : `${cm} cm`;
+  const category = showCalculatedResult ? result.category : "Complete required questions to see score";
+  const targeted = getAvailableTargetoidFeatures(state.imaging).filter(f=>u.targetoidFeatureIds.includes(f.id)).map(f=>f.label);
+  const nonTargeted = LR_M_OVERRIDE_FEATURES.filter(f=>u.lrMOverrideFeatureIds.includes(f.id)).map(f=>f.label);
+  const lrMFeatures = [...targeted,...nonTargeted];
+  const lrMText = !hasAnsweredInitialQuestion ? "__" : (lrMFeatures.length ? `Yes — ${lrMFeatures.join(", ")}` : u.malignantNotHcc ? "Yes" : "No");
+  const ancillary = getAvailableAncillaryFeatures(state.imaging).filter(f=>u.ancillaryFeatureIds.includes(f.id));
+  const afMal = ancillary.filter(f=>f.effect==="malignancy").map(f=>f.label);
+  const afBen = ancillary.filter(f=>f.effect==="benignity").map(f=>f.label);
+  const yesNo = (status: MajorFeatureStatus): string => status==="yes" ? "Yes" : status==="no" ? "No" : status==="nonEvaluable" ? "Non-evaluable" : "__";
+  const aphe = targeted.some(x=>x==="Rim APHE") ? "Rim" : u.apheStatus==="yes" ? "Nonrim" : yesNo(u.apheStatus);
+  const apheEssentials = aphe === "Rim" || aphe === "Nonrim" ? "Yes" : aphe;
+  const washout = yesNo(u.washoutStatus);
+  const washoutWithPhase = washout==="Yes" && r.washoutPhase.trim() ? `${washout} (${r.washoutPhase.trim()})` : washout;
+  const capsule = yesNo(u.capsuleStatus);
+  const capsuleFull = u.capsuleStatus==="yes" ? "Present" : u.capsuleStatus==="no" ? "Absent" : yesNo(u.capsuleStatus);
+  const tpHbp = state.imaging.modality==="mri" && state.imaging.mriContrastAgent==="hepatobiliary" ? yesNo(u.tpHbpStatus) : "Not applicable";
+  const tiv = !hasAnsweredInitialQuestion ? "__" : u.tiv ? `Yes${r.tivVessels.trim() ? ` — ${r.tivVessels.trim()}` : ""}${r.tivDescription.trim() ? `; ${r.tivDescription.trim()}` : ""}` : "No";
+  const sf = (xs:string[])=>xs.length ? xs.join(", ") : "None";
+  if (r.reportFormat==="fullMacro") {
+    return [
+      `Observation ${obs}:`,
+      `Location: Segment ${seg}`,
+      `Size: ${sizeText} (image ${r.imageNumber.trim()||"__"}, series ${r.seriesNumber.trim()||"__"})`,
+      `Tumor in Vein: ${tiv}`,
+      `LR-M Features: ${lrMText}${targeted.length || nonTargeted.length ? `; targetoid features: ${sf(targeted)}; nontargetoid features: ${sf(nonTargeted)}` : ""}`,
+      "Major features:",
+      `  APHE: ${aphe}`,
+      `  Nonperipheral washout: ${washout}`,
+      `  Enhancing capsule: ${capsuleFull}`,
+      `  Transitional/Hepatobiliary Phase hypointensity: ${tpHbp}`,
+      "Ancillary Features:",
+      `  AF-malignancy: ${sf(afMal)}`,
+      `  AF-benignity: ${sf(afBen)}`,
+      "Comparison:",
+      `  Prior(s): Size: ${priorCm}, Date: ${r.priorDate.trim()||"__"}, LI-RADS category: ${r.priorCategory.trim()||"__"}`,
+      `LI-RADS category: ${category}`,
+      "Observation assessment:",
+      `Segment ${seg}, ${category} observation, ${sizeText}.`,
+      "Radiology recommendations:",
+      r.radiologyRecommendations.trim() || "Not specified",
+    ].join("\n");
   }
-
-  const essentialsLines: string[] = [];
-
-  const essentialsObs = r.observationNumber.trim()
-    ? `[${r.observationNumber.trim()}]`
-    : "[#]";
-  const essentialsSegment = r.segment.trim() || "__";
-  const essentialsSeriesImage =
-    r.seriesNumber.trim() || r.imageNumber.trim()
-      ? `[${r.seriesNumber.trim() || "__"}/${r.imageNumber.trim() || "__"}]`
-      : "[Series/image]";
-
-  const essentialsSize = u.sizeValue.trim() || (u.tiv ? "Not applicable" : "__");
-  const essentialsSizeUnit = u.sizeUnit || "mm";
-  const essentialsSizeWithUnit = u.sizeValue.trim()
-    ? `${essentialsSize} ${essentialsSizeUnit}`
-    : essentialsSize;
-  const essentialsPriorSize = r.priorSize.trim()
-    ? `${r.priorSize.trim()} ${priorSizeUnit}`
-    : "[No priors]";
-  const essentialsTivText = !hasAnsweredInitialQuestion
-    ? "__"
-    : u.tiv
-    ? `Yes${tivVessels ? ` — ${tivVessels}` : ""}`
-    : "No";
-  const essentialsLrMText = !hasAnsweredInitialQuestion
-    ? "__"
-    : lrMFeaturesText;
-  const essentialsAncillaryText =
-    selectedAncillaryFeatures.length > 0 ? allAncillaryText : "__";
-  const essentialsCategory = showCalculatedResult
-    ? String(result.category)
-    : "Complete required questions to see score";
-
-  essentialsLines.push(`Observation ${essentialsObs}:`);
-  essentialsLines.push(
-    `Segment ${essentialsSegment}, ${essentialsSeriesImage}. ${
-      u.tiv ? "Size of parenchymal component" : "Size"
-    }: ${essentialsSizeWithUnit}. Prior size: ${essentialsPriorSize}`
-  );
-  essentialsLines.push(`Tumor in vein: ${essentialsTivText}`);
-  essentialsLines.push(`LR-M features: ${essentialsLrMText}`);
-  essentialsLines.push(
-    `Major features: APHE: ${apheText}; Washout: ${washoutText}; Enhancing capsule: ${capsuleText}; Threshold growth: ${thresholdGrowthText}`
-  );
-  essentialsLines.push(`Ancillary features: ${essentialsAncillaryText}`);
-  essentialsLines.push(`LI-RADS category: ${essentialsCategory}`);
-
-  return essentialsLines.join("\n");
+  return [
+    `Observation ${obs}:`,
+    `Segment ${seg}, [${r.seriesNumber.trim()||"__"}/${r.imageNumber.trim()||"__"}]. Size: ${sizeText}. Prior size: ${priorCm}.`,
+    `Tumor in vein: ${tiv}`,
+    `Major features: APHE: ${apheEssentials}; Nonperipheral washout: ${washoutWithPhase}; Enhancing capsule: ${capsule}`,
+    `Ancillary features: ${ancillary.length ? [afMal.length?`AF-malignancy: ${sf(afMal)}`:"",afBen.length?`AF-benignity: ${sf(afBen)}`:""].filter(Boolean).join("; ") : "None"}. LR-M features: ${lrMText}`,
+    `LI-RADS category: ${category}`,
+  ].join("\n");
 }
+
 
 async function copyReport(
   state: AppState,
