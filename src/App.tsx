@@ -1484,6 +1484,7 @@ function SizeInputBlock({
   onSizeChange,
   openSpecialGallery,
   title = "Size",
+  showRequiredIndicator = false,
 }: {
   sizeValue: string;
   sizeUnit: SizeUnit;
@@ -2691,7 +2692,7 @@ export default function App() {
             </Section>
 
             {selectedSpecial === "none" && (
-              <Section title="Is the observation a mass?" subtitle="The CT/MRI v2027 diagnostic table applies only to masses.">
+              <Section title="Is the observation a mass?">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[{value:"mass", label:"Mass"},{value:"nonmass",label:"Nonmass (or uncertain)"}].map(o => (
                     <label key={o.value} className="flex items-center gap-3 rounded-2xl border p-3">
