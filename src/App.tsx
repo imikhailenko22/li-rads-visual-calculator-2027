@@ -2036,7 +2036,7 @@ export default function App() {
 
   const [copied, setCopied] = useState(false);
   const [showRequiredIndicators, setShowRequiredIndicators] = useState(false);
-  const [showDevelopmentTeam, setShowDevelopmentTeam] = useState(false);
+
 
   const [hasAnsweredInitialQuestion, setHasAnsweredInitialQuestion] =
     useState(false);
@@ -2165,6 +2165,18 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8">
+      {/* Shared navigation banner: mirrors the About page. */}
+      <nav aria-label="Main navigation" className="-mx-4 -mt-4 mb-7 border-b border-slate-200 bg-white px-4 py-[18px] md:-mx-8 md:-mt-8 md:px-8">
+        <div className="mx-auto flex max-w-[1050px] flex-wrap items-center justify-between gap-4">
+          <a href="/" className="text-lg font-extrabold leading-tight text-slate-800 no-underline hover:text-blue-700">
+            LI-RADS Visual Calculator
+          </a>
+          <div className="flex items-center gap-5 text-sm font-semibold">
+            <a href="/" aria-current="page" className="text-slate-900 no-underline">Calculator</a>
+            <a href="/about.html" className="text-blue-700 no-underline hover:underline">About</a>
+          </div>
+        </div>
+      </nav>
       {specialGallery && (
         <SpecialLightbox
           //title={specialGallery.title}
@@ -2172,77 +2184,6 @@ export default function App() {
           layout={specialGallery.layout ?? "default"}
           onClose={() => setSpecialGallery(null)}
         />
-      )}
-
-      {showDevelopmentTeam && (
-        <div
-          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setShowDevelopmentTeam(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="development-team-title"
-            className="relative w-full max-w-2xl rounded-3xl border bg-white p-6 shadow-xl md:p-8"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              aria-label="Close development team"
-              onClick={() => setShowDevelopmentTeam(false)}
-              className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.25"
-                strokeLinecap="round"
-              >
-                <path d="M6 6l12 12" />
-                <path d="M18 6L6 18" />
-              </svg>
-            </button>
-
-            <div className="px-10 text-center">
-              <h2
-                id="development-team-title"
-                className="text-xl font-bold text-gray-900"
-              >
-                Development Team
-              </h2>
-              <p className="mt-1 text-sm text-gray-500">
-                Contributors to the LI-RADS v2027 CT/MRI Visual Calculator.
-              </p>
-            </div>
-
-            <div className="mt-6">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {[
-                  "Ilia Mikhailenko",
-                  "Claude Sirlin, MD",
-                  "Victoria Chernyak, MD",
-                  "An Tang, MD, MSc",
-                  "Alexandra Roudenko, MD",
-                  "Guilherme Cunha, MD",
-                  "Walter Henderson",
-                ].map((name, index) => (
-                  <div
-                    key={name}
-                    className={
-                      "rounded-2xl border bg-gray-50 px-4 py-3 text-center text-sm font-medium text-gray-700" +
-                      (index === 6 ? " sm:col-span-2 sm:mx-auto sm:w-[calc(50%-0.375rem)]" : "")
-                    }
-                  >
-                    {name}
-                  </div>
-                ))}
-              </div>
-
-            </div>
-          </div>
-        </div>
       )}
 
       <div className="mx-auto max-w-7xl space-y-6">
@@ -2273,6 +2214,7 @@ export default function App() {
 
         <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
+            <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.14em] text-blue-600">CT/MRI LI-RADS v2027 · DRAFT FRAMEWORK</p>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
               LI-RADS v2027 CT/MRI Visual Calculator (Draft)
             </h1>
@@ -3016,39 +2958,6 @@ export default function App() {
               </div>
             </Section>
 
-            <button
-              type="button"
-              onClick={() => setShowDevelopmentTeam(true)}
-              className="inline-flex h-12 w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-5 text-lg font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50"
-            >
-              Development Team
-            </button>
-
-            {/* <Section title="Quick Reference">
-              <div className="flex flex-wrap gap-2">
-                <Pill>Non-rim APHE</Pill>
-                <Pill>Non-peripheral washout</Pill>
-                <Pill>Enhancing capsule</Pill>
-                <Pill>Threshold growth</Pill>
-                <Pill>Size thresholds: &lt;10 / 10–19 / ≥20 mm</Pill>
-              </div>
-            </Section> */}
-
-            <Section
-              title="Feedback"
-              subtitle="Help improve this tool by reporting bugs, suggesting changes, or sharing any other general input you have."
-            >
-              <div className="space-y-3">
-                <a
-                  href={FEEDBACK_FORM_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 hover:text-gray-900"
-                >
-                  Submit feedback
-                </a>
-              </div>
-            </Section>
           </div>
         </div>
       </div>
