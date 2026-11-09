@@ -570,9 +570,6 @@ const CATEGORY_COLORS: Record<
   },
 };
 
-const FEEDBACK_FORM_URL =
-  "https://docs.google.com/forms/d/e/1FAIpQLSdn9ifHMhy2LwgmYPbMdC6AOEvL654C-s8NHCsJP6rY_XXjTw/viewform?usp=header";
-
 // -------- Major-feature gallery (with zoom) --------
 
 function CloseCircleButton({
