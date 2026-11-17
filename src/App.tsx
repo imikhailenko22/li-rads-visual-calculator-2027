@@ -2225,7 +2225,7 @@ export default function App() {
 
         <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.14em] text-blue-600">CT/MRI LI-RADS v2027 · DRAFT FRAMEWORK</p>
+            <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.14em] text-blue-600">CT/MRI LI-RADS v2027 </p>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
               LI-RADS v2027 CT/MRI Visual Calculator (Draft)
             </h1>
