@@ -218,13 +218,12 @@ const LR_M_OVERRIDE_FEATURES = [
   },
 ] as const;
 
-// Re-usable benign sub-features used by LR-1 and LR-2
+// Re-usable benign sub-features used by combined LR-1/2
 
 // -------- Special-question config --------
 
 type SpecialKey =
   | "examCompromised"
-  | "definitelyBenign"
   | "probablyBenign"
   | "tiv"
   | "malignantNotHcc"
@@ -248,35 +247,19 @@ type SpecialVisualConfig =
   | { type: "features"; title: string; features: SpecialFeature[] };
 
 // The v2027 draft LR-1/2 branch explicitly identifies these benign patterns.
-// The draft groups LR-1 and LR-2; separate definite/probable inputs preserve
-// the existing interface provisionally pending committee sign-off.
+// One combined benign selection produces LR-1/2 and retains the full probable-benign example set.
 const BENIGN_FEATURES: SpecialFeature[] = [
-  { id: "cyst", label: "Cyst" },
   { id: "perfusionAlt", label: "Perfusion alteration" },
-  { id: "hemangioma", label: "Hemangioma" },
   { id: "hepaticFat", label: "Focal fat deposition" },
   { id: "focalFat", label: "Focal fat sparing" },
+  { id: "cyst", label: "Cyst" },
+  { id: "hemangioma", label: "Hemangioma" },
   { id: "distinctiveNodWithout", label: "Nodule with no major features, LR-M features, or AF-malignancy" },
 ];
 
-const DEFINITELY_BENIGN_FEATURES: SpecialFeature[] = BENIGN_FEATURES.filter(
-  (f) => f.id !== "distinctiveNodWithout"
-);
-
-const PROBABLY_BENIGN_FEATURES: SpecialFeature[] = [
-  ...DEFINITELY_BENIGN_FEATURES.map((feature) => ({
-    ...feature,
-    label:
-      feature.id === "cyst"
-        ? "Probable cyst"
-        : feature.id === "hemangioma"
-        ? "Probable hemangioma"
-        : feature.id === "otherBenign"
-        ? "Other"
-        : `Probable ${feature.label.toLowerCase()}`,
-  })),
-  ...BENIGN_FEATURES.filter((f) => f.id === "distinctiveNodWithout"),
-];
+// The combined LR-1/2 choice uses neutral entity names in reference panels,
+// checkboxes, and case report text.
+const PROBABLY_BENIGN_FEATURES: SpecialFeature[] = BENIGN_FEATURES;
 
 // Galleries keyed by logical name
 const SPECIAL_GALLERIES: Record<string, GalleryItem[]> = {
@@ -417,8 +400,7 @@ const SPECIAL_OPTIONS: { value: SpecialKey | "none"; label: string }[] = [
     value: "tiv",
     label: "The observation has definite enhancing tissue in vein (TIV)",
   },
-  { value: "definitelyBenign", label: "The observation is definitely benign" },
-  { value: "probablyBenign", label: "The observation is probably benign" },
+  { value: "probablyBenign", label: "The observation is definitely or probably benign" },
   {
     value: "malignantNotHcc",
     label: "The observation has at least one targetoid imaging feature",
@@ -451,15 +433,9 @@ const SPECIAL_OPTION_CONFIG: Partial<Record<SpecialKey, SpecialVisualConfig>> =
         },
       ],
     },
-    definitelyBenign: {
-      type: "features",
-      title: "BENIGN PATTERNS",
-      features: DEFINITELY_BENIGN_FEATURES,
-    },
-
     probablyBenign: {
       type: "features",
-      title: "PROBABLY BENIGN ENTITIES",
+      title: "BENIGN ENTITIES",
       features: PROBABLY_BENIGN_FEATURES,
     },
   };
@@ -515,7 +491,6 @@ function specialOptionHasVisuals(key: SpecialKey): boolean {
 // read current special selection from booleans
 function getSelectedSpecial(u: UntreatedInputs): SpecialKey | "none" {
   if (u.examCompromised) return "examCompromised";
-  if (u.definitelyBenign) return "definitelyBenign";
   if (u.probablyBenign) return "probablyBenign";
   if (u.tiv) return "tiv";
   if (u.malignantNotHcc) return "malignantNotHcc";
@@ -538,14 +513,9 @@ const CATEGORY_COLORS: Record<
     borderColor: "#010001",
     color: "#111827",
   },
-  "LR-1": {
+  "LR-1/2": {
     backgroundColor: "#E6F5E1",
     borderColor: "#58BC3A",
-    color: "#111827",
-  },
-  "LR-2": {
-    backgroundColor: "#F0FADB",
-    borderColor: "#8BCB32",
     color: "#111827",
   },
   "LR-3": {
@@ -760,14 +730,13 @@ type MajorFeatureStatus = "" | "yes" | "no" | "nonEvaluable";
 
 interface UntreatedInputs {
   examCompromised: boolean;
-  definitelyBenign: boolean;
   probablyBenign: boolean;
   tiv: boolean;
   malignantNotHcc: boolean;
   uncertainMass: boolean;
   massKind: "" | "mass" | "nonmass";
   tpHbpStatus: MajorFeatureStatus;
-  tpHbpNonEvaluableReason: string;
+  tpHbpComments: string;
 
   aphe: boolean;
   capsule: boolean;
@@ -777,9 +746,10 @@ interface UntreatedInputs {
   capsuleStatus: MajorFeatureStatus;
   washoutStatus: MajorFeatureStatus;
 
-  apheNonEvaluableReason: string;
-  capsuleNonEvaluableReason: string;
-  washoutNonEvaluableReason: string;
+
+  apheComments: string;
+  capsuleComments: string;
+  washoutComments: string;
 
   sizeValue: string;
   sizeUnit: SizeUnit;
@@ -968,7 +938,7 @@ function Stat({
 
 // ------------- LI-RADS Decision Engine -------------
 
-const CATEGORY_ORDER = ["LR-1", "LR-2", "LR-3", "LR-4", "LR-5"] as const;
+const CATEGORY_ORDER = ["LR-1/2", "LR-3", "LR-4", "LR-5"] as const;
 
 type UntreatedCategory =
   | (typeof CATEGORY_ORDER)[number]
@@ -993,13 +963,28 @@ function computeUntreated(inputs: UntreatedInputs): EngineResult {
   const steps: string[] = [];
   const finish = (category: UntreatedCategory): EngineResult => ({
     category,
-    title: ({ "LR-NC": "Not categorizable", "LR-TIV": "Tumor in vein", "LR-1": "Definitely benign", "LR-2": "Probably benign", "LR-3": "Intermediate probability of HCC", "LR-4": "Probably HCC", "LR-5": "Definitely HCC", "LR-M": "Malignant, not specific for HCC" } as Record<UntreatedCategory,string>)[category],
+    title: ({ "LR-NC": "Not categorizable", "LR-TIV": "Tumor in vein", "LR-1/2": "Definitely or probably benign", "LR-3": "Intermediate probability of HCC", "LR-4": "Probably HCC", "LR-5": "Definitely HCC", "LR-M": "Malignant, not specific for HCC" } as Record<UntreatedCategory,string>)[category],
     explanation: steps,
   });
   if (inputs.examCompromised) { steps.push("Image degradation or omission prevents categorization."); return finish("LR-NC"); }
   if (inputs.tiv) { steps.push("Definite tumor in vein."); return finish("LR-TIV"); }
-  if (inputs.definitelyBenign) { steps.push("Definitely benign finding: LR-1 within draft LR-1/2 branch."); return finish("LR-1"); }
-  if (inputs.probablyBenign) { steps.push("Probably benign finding: LR-2 within draft LR-1/2 branch."); return finish("LR-2"); }
+  if (inputs.probablyBenign) {
+    // The benign-entity pathway still permits ancillary feature selection.
+    // Formal AF-benignity and AF-malignancy together cancel each other for scoring.
+    const selectedAncillary = ANCILLARY_FEATURES.filter(f => inputs.ancillaryFeatureIds.includes(f.id));
+    const hasMalignancy = selectedAncillary.some(f => f.effect === "malignancy");
+    const hasBenignity = selectedAncillary.some(f => f.effect === "benignity");
+    if (hasMalignancy && hasBenignity) {
+      steps.push("Both AF-malignancy and AF-benignity are present; ancillary features do not change LR-1/2.");
+      return finish("LR-1/2");
+    }
+    if (hasMalignancy) {
+      steps.push("AF-malignancy upgrades LR-1/2 to LR-3.");
+      return finish("LR-3");
+    }
+    steps.push("Definitely or probably benign finding: combined LR-1/2 category.");
+    return finish("LR-1/2");
+  }
   if (inputs.malignantNotHcc) { steps.push("At least one targetoid feature."); return finish("LR-M"); }
   if (inputs.uncertainMass) { steps.push("≥10 mm nonrim APHE-only, mass versus nonmass uncertain."); return finish("LR-3"); }
   let base = computeBaseMajorCategory(inputs);
@@ -1014,7 +999,7 @@ function computeUntreated(inputs: UntreatedInputs): EngineResult {
   if (hasM && hasB) steps.push("Both AF-malignancy and AF-benignity: no ancillary category change.");
   else if (hasM && base === "LR-3") { base = "LR-4"; steps.push("AF-malignancy upgrades LR-3 to LR-4; never to LR-5."); }
   else if (hasB && base === "LR-4") { base = "LR-3"; steps.push("AF-benignity downgrades LR-4 to LR-3."); }
-  else if (hasB && base === "LR-3") { base = "LR-2"; steps.push("AF-benignity downgrades LR-3 to LR-2."); }
+  else if (hasB && base === "LR-3") { base = "LR-1/2"; steps.push("AF-benignity downgrades LR-3 to LR-1/2."); }
   return finish(base);
 }
 
@@ -1094,46 +1079,15 @@ function renderSpecialVisualPanel(
   if (!visibleFeatures.length) return null;
 
   const isBenignVisualPanel =
-  key === "probablyBenign" || key === "definitelyBenign";
+  key === "probablyBenign";
 
 const benignVisualFeatures = visibleFeatures.filter(
   (feature) => feature.id !== "otherBenign"
 );
 
-const benignVisualLeftOrder =
-  key === "probablyBenign"
-    ? [
-        "cyst",
-        "perfusionAlt",
-        "hemangioma",
-        "hepaticFat",
-        "focalFat",
-        "confluentFibrosis",
-      ]
-    : [
-        "cyst",
-        "perfusionAlt",
-        "hemangioma",
-        "hepaticFat",
-        "focalFat",
-      ];
-
-const benignVisualRightOrder =
-  key === "probablyBenign"
-    ? [
-        "hyperPseudo",
-        "focalScar",
-        "vascularAnomaly",
-        "liverAbscess",
-        "distinctiveNodWithout",
-      ]
-    : [
-        "confluentFibrosis",
-        "hyperPseudo",
-        "focalScar",
-        "vascularAnomaly",
-        "liverAbscess",
-      ];
+// Column-major order: top/middle/bottom left, then top/middle/bottom right.
+const benignVisualLeftOrder = ["perfusionAlt", "hepaticFat", "focalFat"];
+const benignVisualRightOrder = ["cyst", "hemangioma", "distinctiveNodWithout"];
 
 const benignVisualLeftFeatures = benignVisualLeftOrder
   .map((id) => benignVisualFeatures.find((feature) => feature.id === id))
@@ -1260,14 +1214,6 @@ const benignVisualRightFeatures = benignVisualRightOrder
         );
       })}
 
-      {key === "probablyBenign" && (
-        <div className="relative min-h-[36px]">
-          <div className="absolute inset-y-0 left-3 flex max-w-[280px] items-center text-left text-[11px] leading-snug text-slate-500">
-            If unsure whether an entity is definitely or probably benign,
-            categorize as probably benign.
-          </div>
-        </div>
-      )}
     </div>
   </div>
 ) : (
@@ -1392,6 +1338,7 @@ interface ReportMeta {
   priorCategory: string;
   washoutPhase: string;
   tivDescription: string;
+  tivExtentChange: string;
   radiologyRecommendations: string;
 }
 
@@ -1529,9 +1476,9 @@ function MajorFeatureQuestion({
   title,
   name,
   status,
-  reason,
   onChange,
-  onReasonChange,
+  comments,
+  onCommentsChange,
   examplesTitle,
   galleryKey,
   openSpecialGallery,
@@ -1541,9 +1488,9 @@ function MajorFeatureQuestion({
   title: string;
   name: string;
   status: MajorFeatureStatus;
-  reason: string;
   onChange: (status: MajorFeatureStatus) => void;
-  onReasonChange: (reason: string) => void;
+  comments: string;
+  onCommentsChange: (comments: string) => void;
   examplesTitle: string;
   galleryKey: string;
   openSpecialGallery: (
@@ -1568,53 +1515,33 @@ function MajorFeatureQuestion({
       }
     >
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-3">
-        <div className="flex flex-col gap-3">
-          <label className="flex w-full items-center gap-3 p-3 border rounded-2xl hover:shadow-sm cursor-pointer">
-            <input
-              type="radio"
-              name={name}
-              className="h-5 w-5 accent-blue-600"
-              checked={status === "yes"}
-              onChange={() => onChange("yes")}
-            />
-            <span className="font-medium">Yes</span>
-          </label>
-
-          <label className="flex w-full items-center gap-3 p-3 border rounded-2xl hover:shadow-sm cursor-pointer">
-            <input
-              type="radio"
-              name={name}
-              className="h-5 w-5 accent-blue-600"
-              checked={status === "no"}
-              onChange={() => onChange("no")}
-            />
-            <span className="font-medium">No (or unsure)</span>
-          </label>
-
-          <label className="flex w-full items-center gap-3 p-3 border rounded-2xl hover:shadow-sm cursor-pointer">
-            <input
-              type="radio"
-              name={name}
-              className="h-5 w-5 accent-blue-600"
-              checked={status === "nonEvaluable"}
-              onChange={() => onChange("nonEvaluable")}
-            />
-            <span className="font-medium">Non-evaluable</span>
-          </label>
-
-          {status === "nonEvaluable" && (
-            <div className="rounded-2xl border bg-gray-50 p-3">
-              <div className="mb-1 text-xs font-semibold text-gray-700">
-                Reason non-evaluable
-              </div>
-              <input
-                value={reason}
-                onChange={(e) => onReasonChange(e.target.value)}
-                placeholder="e.g., arterial phase timing, motion artifact, missing phase"
-                className="w-full rounded-2xl border px-3 py-2 text-sm"
-              />
-            </div>
-          )}
+        <div className="flex flex-col gap-3" role="group" aria-label={`${title} assessment`}>
+          {([
+            { value: "yes", label: "Yes" },
+            { value: "no", label: "No (or unsure)" },
+            { value: "nonEvaluable", label: "Non-evaluable" },
+          ] as const).map((choice) => (
+            <button
+              key={choice.value}
+              type="button"
+              aria-pressed={status === choice.value}
+              title={status === choice.value ? "Click again to clear selection" : undefined}
+              onClick={() => onChange(status === choice.value ? "" : choice.value)}
+              className={`flex w-full items-center gap-3 p-3 border rounded-2xl text-left transition hover:shadow-sm ${
+                status === choice.value ? "border-blue-500 bg-blue-50" : "border-gray-200 bg-white"
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                  status === choice.value ? "border-blue-600" : "border-gray-400"
+                }`}
+              >
+                {status === choice.value && <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />}
+              </span>
+              <span className="font-medium">{choice.label}</span>
+            </button>
+          ))}
         </div>
 
         <div className="h-full w-[118px] self-stretch">
@@ -1631,6 +1558,20 @@ function MajorFeatureQuestion({
             <span className="hidden sm:inline">Examples</span>
           </button>
         </div>
+      </div>
+
+      <div className="space-y-1">
+        <label htmlFor={`${name}-comments`} className="block text-sm font-semibold text-gray-700">
+          Additional comments (optional)
+        </label>
+        <textarea
+          id={`${name}-comments`}
+          value={comments}
+          onChange={(e) => onCommentsChange(e.target.value)}
+          placeholder="Add feature-specific observations for the case report..."
+          rows={2}
+          className="w-full rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+        />
       </div>
     </Section>
   );
@@ -1658,17 +1599,10 @@ function FeatureCheckboxPanel({
   onOtherTextChange?: (value: string) => void;
 }) {
   const isBenignEntityPanel = features.some(
-    (feature) => feature.id === "otherBenign"
+    (feature) => feature.id === "distinctiveNodWithout"
   );
 
-  const benignLeftColumnOrder = [
-    "cyst",
-    "perfusionAlt",
-    "hemangioma",
-    "hepaticFat",
-    "focalFat",
-    "otherBenign",
-  ];
+  const benignLeftColumnOrder = ["perfusionAlt", "hepaticFat", "focalFat"];
 
   const renderFeatureCard = (feature: SpecialFeature) => {
     const galleryKey = `${feature.id}_positive`;
@@ -1762,32 +1696,28 @@ function FeatureCheckboxPanel({
   );
 }
 
-export default function App() {
-  
-  const [examAdequacy, setExamAdequacy] = useState<
-    "" | "A" | "B" | "C"
-  >("");
 
-  const [state, setState] = useState<AppState>({
+// Create independent empty inputs for each new observation.
+function createInitialAppState(): AppState {
+  return {
     untreated: {
       examCompromised: false,
-      definitelyBenign: false,
       probablyBenign: false,
       tiv: false,
       malignantNotHcc: false,
       uncertainMass: false,
       massKind: "mass",
       tpHbpStatus: "",
-      tpHbpNonEvaluableReason: "",
+      tpHbpComments: "",
       aphe: false,
       capsule: false,
       washout: false,
       apheStatus: "",
       capsuleStatus: "",
       washoutStatus: "",
-      apheNonEvaluableReason: "",
-      capsuleNonEvaluableReason: "",
-      washoutNonEvaluableReason: "",
+      apheComments: "",
+      capsuleComments: "",
+      washoutComments: "",
       sizeValue: "",
       sizeUnit: "mm",
       sizeBucket: ">=10",
@@ -1821,9 +1751,37 @@ export default function App() {
       priorCategory: "",
       washoutPhase: "",
       tivDescription: "",
+      tivExtentChange: "",
       radiologyRecommendations: "",
     },
+  };
+}
+
+export default function App() {
+  // Explicit preference persists; otherwise respect the device color scheme.
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const saved = window.localStorage.getItem("lirads-color-theme");
+      if (saved === "dark") return true;
+      if (saved === "light") return false;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    } catch {
+      return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+    }
   });
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem("lirads-color-theme", darkMode ? "dark" : "light");
+    } catch { /* Storage may be disabled; the toggle still works. */ }
+  }, [darkMode]);
+  
+  const [examAdequacy, setExamAdequacy] = useState<
+    "" | "A" | "B" | "C"
+  >("");
+
+  const [state, setState] = useState<AppState>(createInitialAppState);
 
   // const [isEditingSize, setIsEditingSize] = useState(false);
 
@@ -1883,7 +1841,7 @@ export default function App() {
             availableAncillaryIds.has(id)
           ),
           tpHbpStatus: nextImaging.modality === "mri" && nextImaging.mriContrastAgent === "hepatobiliary" ? s.untreated.tpHbpStatus : "",
-          tpHbpNonEvaluableReason: nextImaging.modality === "mri" && nextImaging.mriContrastAgent === "hepatobiliary" ? s.untreated.tpHbpNonEvaluableReason : "",
+          tpHbpComments: nextImaging.modality === "mri" && nextImaging.mriContrastAgent === "hepatobiliary" ? s.untreated.tpHbpComments : "",
         },
       };
     });
@@ -2045,7 +2003,6 @@ export default function App() {
       untreated: {
         ...s.untreated,
         examCompromised: which === "examCompromised",
-        definitelyBenign: which === "definitelyBenign",
         probablyBenign: which === "probablyBenign",
         tiv: which === "tiv",
         malignantNotHcc: which === "malignantNotHcc",
@@ -2055,11 +2012,11 @@ export default function App() {
         targetoidFeatureIds:
           which === "malignantNotHcc" ? s.untreated.targetoidFeatureIds : [],
         benignFeatureIds:
-          which === "definitelyBenign" || which === "probablyBenign"
+          which === "probablyBenign"
             ? s.untreated.benignFeatureIds
             : [],
         benignOtherText:
-          which === "definitelyBenign" || which === "probablyBenign"
+          which === "probablyBenign"
             ? s.untreated.benignOtherText
             : "",
       },
@@ -2121,6 +2078,27 @@ export default function App() {
     }
   }, [showLrMOverrideBox, state.untreated.lrMOverrideFeatureIds.length]);
 
+  const newObservation = () => {
+    setState((previous) => ({
+      ...createInitialAppState(),
+      // These settings belong to the examination, not an individual lesion.
+      imaging: { ...previous.imaging }, // Retain CT/MRI and MRI contrast type.
+      images: { ...previous.images },
+      report: {
+        ...createInitialAppState().report,
+        reportFormat: previous.report.reportFormat,
+        priorDate: previous.report.priorDate, // Keep the prior exam date between observations.
+      },
+    }));
+    // Exam adequacy and night mode are independent state and stay unchanged.
+    setExpandedSpecialKey(null);
+    setSpecialGallery(null);
+    setHasAnsweredInitialQuestion(false);
+    setShowRequiredIndicators(false);
+    setCopied(false);
+    window.scrollTo?.({ top: 0, behavior: "smooth" });
+  };
+
   const reset = () => window.location.reload();
 
   // ✅ UPDATED: accept layout override
@@ -2143,25 +2121,24 @@ export default function App() {
     status: MajorFeatureStatus
   ) => {
     const statusKey = `${feature}Status` as keyof UntreatedInputs;
-    const reasonKey = `${feature}NonEvaluableReason` as keyof UntreatedInputs;
 
     setUntreated({
       ...(feature !== "tpHbp" ? { [feature]: status === "yes" } : {}),
       [statusKey]: status,
-      ...(status !== "nonEvaluable" ? { [reasonKey]: "" } : {}),
     } as Partial<UntreatedInputs>);
   };
 
-  const setMajorFeatureNonEvaluableReason = (
+
+  const setMajorFeatureComments = (
     feature: "aphe" | "capsule" | "washout" | "tpHbp",
-    reason: string
+    comments: string
   ) => {
-    const reasonKey = `${feature}NonEvaluableReason` as keyof UntreatedInputs;
-    setUntreated({ [reasonKey]: reason } as Partial<UntreatedInputs>);
+    const commentsKey = `${feature}Comments` as keyof UntreatedInputs;
+    setUntreated({ [commentsKey]: comments } as Partial<UntreatedInputs>);
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 md:p-8">
+    <div className={`min-h-screen bg-gray-100 p-4 md:p-8 ${darkMode ? "lirads-dark" : ""}`}>
       {/* Shared navigation banner: mirrors the About page. */}
       <nav aria-label="Main navigation" className="-mx-4 -mt-4 mb-7 border-b border-slate-200 bg-white px-4 py-[18px] md:-mx-8 md:-mt-8 md:px-8">
         <div className="mx-auto flex max-w-[1050px] flex-wrap items-center justify-between gap-4">
@@ -2169,6 +2146,12 @@ export default function App() {
             LI-RADS Visual Calculator
           </a>
           <div className="flex items-center gap-5 text-sm font-semibold">
+            <button type="button" onClick={() => setDarkMode((v) => !v)}
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              aria-pressed={darkMode}
+              className="rounded-xl border border-slate-200 px-3 py-2 font-semibold hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-600/30">
+              {darkMode ? "☀ Light mode" : "☾ Dark mode"}
+            </button>
             <a href="/" aria-current="page" className="text-slate-900 no-underline">Calculator</a>
             <a href="/about.html" className="text-blue-700 no-underline hover:underline">About</a>
           </div>
@@ -2185,6 +2168,37 @@ export default function App() {
 
       <div className="mx-auto max-w-7xl space-y-6">
         <style>{`
+
+          /* Dark theme uses scoped overrides so existing Tailwind styles remain intact.
+             Preserve diagnostic category badge colors and original image colors. */
+          .lirads-dark { background-color: #0b1120 !important; color: #e5eaf3; color-scheme: dark; }
+          .lirads-dark :is(section, nav, [class~="bg-white"], [class~="bg-gray-50"], [class~="bg-gray-100"], [class~="bg-slate-100"]):not([style]) { background-color: #172235 !important; }
+          .lirads-dark [class~="bg-blue-50"],
+          .lirads-dark [class~="bg-blue-100"] { background-color: #193654 !important; }
+          .lirads-dark [class~="bg-red-50"], .lirads-dark [class~="bg-red-100"] { background-color: #452431 !important; }
+          .lirads-dark [class~="bg-emerald-50"] { background-color: #163d36 !important; }
+          .lirads-dark [class~="bg-white/90"] { background-color: #26354a !important; }
+          .lirads-dark :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+            background-color: #101a2b !important; color: #eff5ff !important;
+            border-color: #43536b !important;
+          }
+          .lirads-dark :is(input, textarea)::placeholder { color: #a3b1c7 !important; opacity: 1; }
+          .lirads-dark :is(button, label) { color: inherit; }
+          .lirads-dark [class*="text-gray-"], .lirads-dark [class*="text-slate-"],
+          .lirads-dark [class*="text-black/"] { color: #d3dfef !important; }
+          .lirads-dark [class~="text-blue-700"], .lirads-dark [class~="text-blue-600"] { color: #93c5fd !important; }
+          .lirads-dark [class~="text-red-900"], .lirads-dark [class~="text-red-800"] { color: #fda4af !important; }
+          .lirads-dark [class~="text-emerald-700"] { color: #86efac !important; }
+          .lirads-dark [class~="text-amber-700"] { color: #fcd34d !important; }
+          .lirads-dark :is([class~="border-gray-200"], [class~="border-gray-300"], [class~="border-slate-200"], [class~="border-blue-200"], [class~="border-red-200"]) { border-color: #3c506d !important; }
+          .lirads-dark :is(section, nav, .border, .border-2) { border-color: #394962; }
+          .lirads-dark [class~="bg-blue-600"] { background-color: #2563eb !important; }
+          .lirads-dark [class~="text-white"] { color: #fff !important; }
+          /* The engine uses light diagnostic category fills even in night mode. */
+          .lirads-dark [class~="bg-gray-50"][style] :is([class*="text-black/"], [class*="text-gray-"]) {
+            color: #111827 !important;
+          }
+          .lirads-dark .results-rail { scrollbar-color: #51627d transparent; }
           @keyframes result-change {
             0% { opacity: 0.72; transform: translateY(-2px); }
             100% { opacity: 1; transform: translateY(0); }
@@ -2219,12 +2233,27 @@ export default function App() {
               Calculator with visual references to features relevant to LI-RADS.
             </p>
           </div>
-          <button
-            onClick={reset}
-            className="h-11 shrink-0 self-start rounded-xl border bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 hover:text-gray-900"
-          >
-            Reset Calculator
-          </button>
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={newObservation}
+                className="h-11 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                + New Observation
+              </button>
+              <button
+                type="button"
+                onClick={reset}
+                className="h-11 rounded-xl border bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 hover:text-gray-900"
+              >
+                Reset Calculator
+              </button>
+            </div>
+            <p className="max-w-sm text-xs text-gray-600 md:text-right">
+              New Observation retains imaging modality (and MRI contrast agent), exam-level adequacy score, and prior exam date. Other observation details are cleared.
+            </p>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2392,25 +2421,6 @@ export default function App() {
                 </div>
               </div>
             </Section>
-            <Section title="Additional Reporting Details">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="text-xs font-semibold">Prior examination date
-                  <input type="text" placeholder="e.g., 2026-08-14" value={state.report.priorDate} onChange={e=>setReport({priorDate:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
-                </label>
-                <label className="text-xs font-semibold">Prior LI-RADS category
-                  <input type="text" placeholder="e.g., LR-3" value={state.report.priorCategory} onChange={e=>setReport({priorCategory:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
-                </label>
-                <label className="text-xs font-semibold">Washout phase (if present)
-                  <input type="text" placeholder="e.g., portal venous" value={state.report.washoutPhase} onChange={e=>setReport({washoutPhase:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
-                </label>
-                <label className="text-xs font-semibold">Tumor-in-vein extent / probable etiology
-                  <input type="text" placeholder="Distribution, extent, likely etiology" value={state.report.tivDescription} onChange={e=>setReport({tivDescription:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
-                </label>
-              </div>
-              <label className="block text-xs font-semibold">Radiology recommendations
-                <textarea rows={2} placeholder="Optional" value={state.report.radiologyRecommendations} onChange={e=>setReport({radiologyRecommendations:e.target.value})} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
-              </label>
-            </Section>
             <Section
               title={
                 <div className="flex items-center justify-between gap-3">
@@ -2445,6 +2455,12 @@ export default function App() {
                           <span className="font-medium">{opt.label}</span>
                         </div>
 
+                        {key === "uncertainMass" && (
+                          <span title="Coming soon" className="ml-2 inline-flex cursor-not-allowed items-center gap-1 rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-[12px] font-medium text-gray-400" aria-label="Examples — coming soon">
+                            <span className="text-[14px]" aria-hidden="true">👁</span>
+                            <span className="hidden sm:inline">Examples</span>
+                          </span>
+                        )}
                         {!isNone && hasVisuals && (
                           <button
                             type="button"
@@ -2501,7 +2517,7 @@ export default function App() {
                   {showRequiredIndicators && sizeRequiredForScore && !sizeComplete && (
                     <RequiredForScoreBadge
                       className="shrink-0"
-                      label="Largest dimension required for score"
+                      label="Largest size required for score"
                     />
                   )}
                 </div>
@@ -2515,7 +2531,7 @@ export default function App() {
                       ? "Size of parenchymal component, if visible"
                       : selectedSpecial === "examCompromised"
                       ? "Size, if measurable"
-                      : "Largest dimension"
+                      : "Largest size"
                   }
                   sizeValue={state.untreated.sizeValue}
                   sizeUnit={state.untreated.sizeUnit}
@@ -2523,33 +2539,87 @@ export default function App() {
                   openSpecialGallery={openSpecialGallery}
                 />
 
-                <div className="space-y-1">
-                  <div className="text-xs font-semibold text-gray-700 leading-none mb-1 pl-1">
-                    Prior size (optional)
-                  </div>
-                  <MeasurementInput
-                    value={state.report.priorSize}
-                    unit={state.report.priorSizeUnit}
-                    onValueChange={(value) => setReport({ priorSize: value })}
-                    onUnitChange={(unit) => setReport({ priorSizeUnit: unit })}
-                    placeholder="e.g., 2"
-                  />
-                </div>
-
-                {selectedSpecial === "tiv" && (
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700 leading-none mb-1 pl-1">
-                      Vessels involved
-                    </div>
+                {/* Consistent observation metadata layout for both TIV and non-TIV. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <label className="space-y-1 block">
+                    <span className="block text-xs font-semibold text-gray-700 pl-1">Series #</span>
                     <input
-                      value={state.report.tivVessels}
-                      onChange={(e) =>
-                        setReport({ tivVessels: e.target.value })
-                      }
-                      placeholder="e.g., right portal vein, main portal vein"
+                      value={state.report.seriesNumber}
+                      onChange={(e) => setReport({ seriesNumber: e.target.value })}
+                      placeholder="e.g., 7"
                       className="w-full rounded-2xl border px-3 py-2"
                     />
+                  </label>
+                  <label className="space-y-1 block">
+                    <span className="block text-xs font-semibold text-gray-700 pl-1">Image #</span>
+                    <input
+                      value={state.report.imageNumber}
+                      onChange={(e) => setReport({ imageNumber: e.target.value })}
+                      placeholder="e.g., 34"
+                      className="w-full rounded-2xl border px-3 py-2"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <label className="space-y-1 block">
+                    <span className="block text-xs font-semibold text-gray-700 pl-1">Prior exam date (optional)</span>
+                    <input
+                      type="text"
+                      value={state.report.priorDate}
+                      onChange={(e) => setReport({ priorDate: e.target.value })}
+                      placeholder="e.g., 2026-08-14"
+                      className="w-full rounded-2xl border px-3 py-2"
+                    />
+                  </label>
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-gray-700 pl-1">
+                      {selectedSpecial === "tiv"
+                        ? "Prior size of parenchymal component (optional)"
+                        : "Prior exam size (optional)"}
+                    </div>
+                    <MeasurementInput
+                      value={state.report.priorSize}
+                      unit={state.report.priorSizeUnit}
+                      onValueChange={(value) => setReport({ priorSize: value })}
+                      onUnitChange={(unit) => setReport({ priorSizeUnit: unit })}
+                      placeholder="e.g., 2"
+                    />
                   </div>
+                </div>
+
+                {selectedSpecial === "tiv" ? (
+                  <>
+                    <label className="space-y-1 block">
+                      <span className="block text-xs font-semibold text-gray-700 pl-1">Change in extent of vessel involvement (optional)</span>
+                      <textarea
+                        rows={2}
+                        value={state.report.tivExtentChange}
+                        onChange={(e) => setReport({ tivExtentChange: e.target.value })}
+                        placeholder="e.g., Increased involvement compared with prior examination"
+                        className="w-full rounded-2xl border px-3 py-2 resize-y"
+                      />
+                    </label>
+                    <label className="space-y-1 block">
+                      <span className="block text-xs font-semibold text-gray-700 pl-1">Current vessels involved (optional)</span>
+                      <input
+                        value={state.report.tivVessels}
+                        onChange={(e) => setReport({ tivVessels: e.target.value })}
+                        placeholder="e.g., right portal vein, main portal vein"
+                        className="w-full rounded-2xl border px-3 py-2"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label className="space-y-1 block">
+                    <span className="block text-xs font-semibold text-gray-700 pl-1">Prior exam LI-RADS category (optional)</span>
+                    <input
+                      value={state.report.priorCategory}
+                      onChange={(e) => setReport({ priorCategory: e.target.value })}
+                      placeholder="e.g., LR-3"
+                      className="w-full rounded-2xl border px-3 py-2"
+                    />
+                  </label>
                 )}
 
                 {selectedSpecial === "malignantNotHcc" &&
@@ -2564,26 +2634,10 @@ export default function App() {
                     />
                   )}
 
-                {selectedSpecial === "definitelyBenign" &&
-                  SPECIAL_OPTION_CONFIG.definitelyBenign?.type ===
-                    "features" && (
-                    <FeatureCheckboxPanel
-                      title="Select the benign entities present:"
-                      features={SPECIAL_OPTION_CONFIG.definitelyBenign.features}
-                      selectedIds={state.untreated.benignFeatureIds}
-                      onToggle={toggleBenignFeature}
-                      openSpecialGallery={openSpecialGallery}
-                      otherText={state.untreated.benignOtherText}
-                      onOtherTextChange={(value) =>
-                        setUntreated({ benignOtherText: value })
-                      }
-                    />
-                  )}
-
                 {selectedSpecial === "probablyBenign" &&
                   SPECIAL_OPTION_CONFIG.probablyBenign?.type === "features" && (
                     <FeatureCheckboxPanel
-                      title="Select the probably benign entities present:"
+                      title="Select the benign entities present:"
                       features={SPECIAL_OPTION_CONFIG.probablyBenign.features}
                       selectedIds={state.untreated.benignFeatureIds}
                       onToggle={toggleBenignFeature}
@@ -2595,37 +2649,6 @@ export default function App() {
                     />
                   )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Series # */}
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700 leading-none mb-1 pl-1">
-                      Series #
-                    </div>
-                    <input
-                      value={state.report.seriesNumber}
-                      onChange={(e) =>
-                        setReport({ seriesNumber: e.target.value })
-                      }
-                      placeholder="e.g., 7"
-                      className="w-full rounded-2xl border px-3 py-2"
-                    />
-                  </div>
-
-                  {/* Image # */}
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-gray-700 leading-none mb-1 pl-1">
-                      Image #
-                    </div>
-                    <input
-                      value={state.report.imageNumber}
-                      onChange={(e) =>
-                        setReport({ imageNumber: e.target.value })
-                      }
-                      placeholder="e.g., 34"
-                      className="w-full rounded-2xl border px-3 py-2"
-                    />
-                  </div>
-                </div>
               </div>
             </Section>
 
@@ -2639,7 +2662,7 @@ export default function App() {
                     </label>
                   ))}
                 </div>
-                {state.untreated.massKind!=="mass" && <p className="text-sm text-amber-700">Use the dedicated benign/nonmass branches when applicable. The draft does not assign a general diagnostic-table category to other nonmasses.</p>}
+                {state.untreated.massKind!=="mass" && <p className="text-sm text-amber-700">Use the dedicated benign/nonmass branches when applicable. The calculator does not assign a general diagnostic-table category to other nonmasses.</p>}
               </Section>
             )}
 
@@ -2649,11 +2672,9 @@ export default function App() {
                   title="Is nonrim arterial phase hyperenhancement unequivocally present?"
                   name="aphe"
                   status={state.untreated.apheStatus}
-                  reason={state.untreated.apheNonEvaluableReason}
+                  comments={state.untreated.apheComments}
+                  onCommentsChange={(comments) => setMajorFeatureComments("aphe", comments)}
                   onChange={(status) => setMajorFeatureStatus("aphe", status)}
-                  onReasonChange={(reason) =>
-                    setMajorFeatureNonEvaluableReason("aphe", reason)
-                  }
                   examplesTitle="Examples of nonrim APHE (APHE present)"
                   galleryKey="aphe_examples"
                   openSpecialGallery={openSpecialGallery}
@@ -2664,12 +2685,10 @@ export default function App() {
                   title="Is enhancing capsule unequivocally present?"
                   name="capsule"
                   status={state.untreated.capsuleStatus}
-                  reason={state.untreated.capsuleNonEvaluableReason}
+                  comments={state.untreated.capsuleComments}
+                  onCommentsChange={(comments) => setMajorFeatureComments("capsule", comments)}
                   onChange={(status) =>
                     setMajorFeatureStatus("capsule", status)
-                  }
-                  onReasonChange={(reason) =>
-                    setMajorFeatureNonEvaluableReason("capsule", reason)
                   }
                   examplesTitle="Examples of enhancing capsule"
                   galleryKey="capsule_examples"
@@ -2682,12 +2701,10 @@ export default function App() {
                   title="Is nonperipheral washout unequivocally present?"
                   name="washout"
                   status={state.untreated.washoutStatus}
-                  reason={state.untreated.washoutNonEvaluableReason}
+                  comments={state.untreated.washoutComments}
+                  onCommentsChange={(comments) => setMajorFeatureComments("washout", comments)}
                   onChange={(status) =>
                     setMajorFeatureStatus("washout", status)
-                  }
-                  onReasonChange={(reason) =>
-                    setMajorFeatureNonEvaluableReason("washout", reason)
                   }
                   examplesTitle="Examples of nonperipheral washout"
                   galleryKey="washout_examples"
@@ -2700,9 +2717,9 @@ export default function App() {
                     title="Is transitional/hepatobiliary phase hypointensity present?"
                     name="tpHbp"
                     status={state.untreated.tpHbpStatus}
-                    reason={state.untreated.tpHbpNonEvaluableReason}
+                  comments={state.untreated.tpHbpComments}
+                  onCommentsChange={(comments) => setMajorFeatureComments("tpHbp", comments)}
                     onChange={(status) => setMajorFeatureStatus("tpHbp", status)}
-                    onReasonChange={(reason) => setMajorFeatureNonEvaluableReason("tpHbp", reason)}
                     examplesTitle="Targetoid TP/HBP examples (reference only)"
                     galleryKey="targetoidTransitionalHbp_positive"
                     openSpecialGallery={openSpecialGallery}
@@ -2738,9 +2755,18 @@ export default function App() {
             )}
 
             {/* Ancillary */}
-            {selectedSpecial === "none" && state.untreated.massKind === "mass" && String(result.category) !== "LR-M" && (
+            {((selectedSpecial === "none" && state.untreated.massKind === "mass" && String(result.category) !== "LR-M") || selectedSpecial === "probablyBenign") && (
               <Section title="Select ancillary features present (masses only):">
                 <div className="rounded-2xl border bg-white p-4">
+                  <label className="mb-4 flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 hover:bg-gray-100">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-blue-600"
+                      checked={state.untreated.ancillaryFeatureIds.length === 0}
+                      onChange={() => setUntreated({ ancillaryFeatureIds: [] })}
+                    />
+                    <span className="text-sm font-medium text-gray-900">None</span>
+                  </label>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <div className="mb-3 text-sm font-bold text-gray-900">
@@ -2877,7 +2903,9 @@ export default function App() {
                   <div className="font-semibold">Recommendation</div>
                   <p className="text-sm text-gray-700 mt-1">
                     {showCalculatedResult
-                      ? (state.report.radiologyRecommendations.trim() || "Not specified in the v2027 draft algorithm; enter institution-approved recommendation in report fields.")
+                      ? (state.report.radiologyRecommendations.trim() || (result.category === "LR-1/2"
+                          ? "Return to surveillance in 6 months. Consider repeat diagnostic imaging in ≤ 6 months."
+                          : "Not specified in the v2027 draft algorithm; enter institution-approved recommendation in report fields."))
                       : "A recommendation will appear once sufficient information is provided."}
                   </p>
                 </div>
@@ -2988,7 +3016,20 @@ function buildReport(state: AppState, result: EngineResult, hasAnsweredInitialQu
   const ancillary = getAvailableAncillaryFeatures(state.imaging).filter(f=>u.ancillaryFeatureIds.includes(f.id));
   const afMal = ancillary.filter(f=>f.effect==="malignancy").map(f=>f.label);
   const afBen = ancillary.filter(f=>f.effect==="benignity").map(f=>f.label);
-  const yesNo = (status: MajorFeatureStatus): string => status==="yes" ? "Yes" : status==="no" ? "No" : status==="nonEvaluable" ? "Non-evaluable" : "__";
+  // Benign entities are selected in the LR-1/2 pathway rather than from the
+  // formal ancillary-feature list. Display them on the AF-benignity line in
+  // Full Macro as requested; scoring remains based on formal AF inputs only.
+  const benignEntityOptions = u.probablyBenign ? PROBABLY_BENIGN_FEATURES : [];
+  const benignEntities = benignEntityOptions
+    .filter(f => u.benignFeatureIds.includes(f.id))
+    .map(f => f.id === "otherBenign" && u.benignOtherText.trim()
+      ? `Other: ${u.benignOtherText.trim()}` : f.label);
+  const yesNo = (status: MajorFeatureStatus): string => status==="yes" ? "Yes" : status==="no" ? "No" : status==="nonEvaluable" ? "Non-evaluable due to image degradation or omission" : "__";
+  // Keep empty comments invisible, and collapse line breaks for compact report formatting.
+  const withComments = (value: string, comments: string): string => {
+    const clean = comments.replace(/\s+/g, " ").trim();
+    return clean ? `${value} (${clean})` : value;
+  };
   const aphe = targeted.some(x=>x==="Rim APHE") ? "Rim" : u.apheStatus==="yes" ? "Nonrim" : yesNo(u.apheStatus);
   const apheEssentials = aphe === "Rim" || aphe === "Nonrim" ? "Yes" : aphe;
   const washout = yesNo(u.washoutStatus);
@@ -2996,7 +3037,7 @@ function buildReport(state: AppState, result: EngineResult, hasAnsweredInitialQu
   const capsule = yesNo(u.capsuleStatus);
   const capsuleFull = u.capsuleStatus==="yes" ? "Present" : u.capsuleStatus==="no" ? "Absent" : yesNo(u.capsuleStatus);
   const tpHbp = state.imaging.modality==="mri" && state.imaging.mriContrastAgent==="hepatobiliary" ? yesNo(u.tpHbpStatus) : "Not applicable";
-  const tiv = !hasAnsweredInitialQuestion ? "__" : u.tiv ? `Yes${r.tivVessels.trim() ? ` — ${r.tivVessels.trim()}` : ""}${r.tivDescription.trim() ? `; ${r.tivDescription.trim()}` : ""}` : "No";
+  const tiv = !hasAnsweredInitialQuestion ? "__" : u.tiv ? `Yes${r.tivVessels.trim() ? ` — ${r.tivVessels.trim()}` : ""}${r.tivExtentChange.trim() ? `; Change in extent of vessel involvement: ${r.tivExtentChange.trim()}` : ""}${r.tivDescription.trim() ? `; ${r.tivDescription.trim()}` : ""}` : "No";
   const sf = (xs:string[])=>xs.length ? xs.join(", ") : "None";
   if (r.reportFormat==="fullMacro") {
     return [
@@ -3006,28 +3047,34 @@ function buildReport(state: AppState, result: EngineResult, hasAnsweredInitialQu
       `Tumor in Vein: ${tiv}`,
       `LR-M Features: ${lrMText}${targeted.length || nonTargeted.length ? `; targetoid features: ${sf(targeted)}; nontargetoid features: ${sf(nonTargeted)}` : ""}`,
       "Major features:",
-      `  APHE: ${aphe}`,
-      `  Nonperipheral washout: ${washout}`,
-      `  Enhancing capsule: ${capsuleFull}`,
-      `  Transitional/Hepatobiliary Phase hypointensity: ${tpHbp}`,
+      `  APHE: ${withComments(aphe, u.apheComments)}`,
+      `  Nonperipheral washout: ${withComments(washout, u.washoutComments)}`,
+      `  Enhancing capsule: ${withComments(capsuleFull, u.capsuleComments)}`,
+      `  Transitional/Hepatobiliary Phase hypointensity: ${withComments(tpHbp, u.tpHbpComments)}`,
       "Ancillary Features:",
       `  AF-malignancy: ${sf(afMal)}`,
-      `  AF-benignity: ${sf(afBen)}`,
+      `  AF-benignity: ${sf([...afBen, ...benignEntities])}`,
       "Comparison:",
-      `  Prior(s): Size: ${priorCm}, Date: ${r.priorDate.trim()||"__"}, LI-RADS category: ${r.priorCategory.trim()||"__"}`,
+      `  Prior(s): Size: ${priorCm}, Date: ${r.priorDate.trim()||"__"}${u.tiv ? "" : `, LI-RADS category: ${r.priorCategory.trim()||"__"}`}`,
       `LI-RADS category: ${category}`,
       "Observation assessment:",
       `Segment ${seg}, ${category} observation, ${sizeText}.`,
       "Radiology recommendations:",
-      r.radiologyRecommendations.trim() || "Not specified",
+      r.radiologyRecommendations.trim() || (category === "LR-1/2"
+        ? "Return to surveillance in 6 months. Consider repeat diagnostic imaging in ≤ 6 months."
+        : "Not specified"),
     ].join("\n");
   }
   return [
     `Observation ${obs}:`,
-    `Segment ${seg}, [${r.seriesNumber.trim()||"__"}/${r.imageNumber.trim()||"__"}]. Size: ${sizeText}. Prior size: ${priorCm}.`,
+    `Segment ${seg}, [${r.seriesNumber.trim()||"__"}/${r.imageNumber.trim()||"__"}]. Size: ${sizeText}. Prior size: ${priorCm}. Prior date: ${r.priorDate.trim()||"__"}${u.tiv ? "" : `. Prior LI-RADS category: ${r.priorCategory.trim()||"__"}`}.`,
     `Tumor in vein: ${tiv}`,
-    `Major features: APHE: ${apheEssentials}; Nonperipheral washout: ${washoutWithPhase}; Enhancing capsule: ${capsule}`,
-    `Ancillary features: ${ancillary.length ? [afMal.length?`AF-malignancy: ${sf(afMal)}`:"",afBen.length?`AF-benignity: ${sf(afBen)}`:""].filter(Boolean).join("; ") : "None"}. LR-M features: ${lrMText}`,
+    `Major features: APHE: ${withComments(apheEssentials, u.apheComments)}; Nonperipheral washout: ${withComments(washoutWithPhase, u.washoutComments)}; Enhancing capsule: ${withComments(capsule, u.capsuleComments)}`,
+    `Ancillary features: ${[
+      afMal.length ? `AF-malignancy: ${sf(afMal)}` : "",
+      afBen.length ? `AF-benignity: ${sf(afBen)}` : "",
+      benignEntities.length ? sf(benignEntities) : "",
+    ].filter(Boolean).join("; ") || "None"}. LR-M features: ${lrMText}`,
     `LI-RADS category: ${category}`,
   ].join("\n");
 }
